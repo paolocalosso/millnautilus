@@ -52,6 +52,15 @@ Richiede GTK ≥ 4.10 e libadwaita ≥ 1.5 (per `Adw.AlertDialog`/`AboutDialog` 
 python3 millnautilus.py
 ```
 
+## Installazione nel menu applicazioni
+
+```bash
+cp millnautilus.desktop ~/.local/share/applications/
+update-desktop-database ~/.local/share/applications/ 2>/dev/null || true
+```
+
+Il file usa l'icona `system-file-manager` del tema in uso (la stessa famiglia di Nautilus). Se sposti il progetto, aggiorna i percorsi `Exec=` e `Path=` nel file .desktop.
+
 ## Note
 
 - L'anteprima PDF/documenti usa le thumbnail generate dal sistema (`thumbnail::path`); se non esiste ancora una thumbnail viene mostrata l'icona del tipo file

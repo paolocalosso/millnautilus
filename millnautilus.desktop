@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Millnautilus
+Comment=File explorer con vista a colonne (Miller view)
+Comment[en]=Column-view (Miller) file explorer
+Exec=python3 /home/paolo/Documents/projects/millnautilus/millnautilus.py %U
+Path=/home/paolo/Documents/projects/millnautilus
+Icon=system-file-manager
+MimeType=inode/directory;
+Terminal=false
+Categories=System;FileTools;FileManager;Utility;GTK;
+Keywords=files;file manager;explorer;miller;columns;
+StartupNotify=true
+StartupWMClass=org.paolo.Millnautilus
