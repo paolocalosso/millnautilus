@@ -6,6 +6,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gio, Gtk  # noqa: E402
 
+from .fm1 import FileManager1  # noqa: E402
 from .window import MainWindow  # noqa: E402
 
 APP_ID = "org.paolo.Millnautilus"
@@ -15,7 +16,17 @@ class MillnautilusApp(Adw.Application):
     def __init__(self):
         super().__init__(application_id=APP_ID,
                          flags=Gio.ApplicationFlags.HANDLES_OPEN)
+        self._fm1 = FileManager1(self)
         self._add_actions()
+
+    def do_dbus_register(self, connection, object_path):
+        Gio.Application.do_dbus_register(self, connection, object_path)
+        self._fm1.register(connection)
+        return True
+
+    def do_dbus_unregister(self, connection, object_path):
+        self._fm1.unregister(connection)
+        Gio.Application.do_dbus_unregister(self, connection, object_path)
 
     def _add_actions(self):
         about = Gio.SimpleAction.new("about", None)

@@ -52,6 +52,16 @@ class MillerView(Gtk.ScrolledWindow):
         self.emit("location-changed", directory)
         self.emit("selection-changed", None)
 
+    def reveal(self, target: Gio.File):
+        """Naviga alla cartella genitore e seleziona `target`."""
+        parent = target.get_parent()
+        if parent is None:
+            self.set_root(target)
+            return
+        self.set_root(parent)
+        if self.columns:
+            self.columns[0].select_file(target)
+
     def _truncate(self, depth: int):
         while len(self.columns) > depth:
             col = self.columns.pop()

@@ -62,6 +62,7 @@ class MillerColumn(Gtk.Box):
         self._cancellable = Gio.Cancellable()
         self._all_items: list[FileItem] = []
         self._icon_theme: Gtk.IconTheme | None = None
+        self._pending_select: Gio.File | None = None
 
         self.set_size_request(COLUMN_WIDTH, -1)
         self.add_css_class("miller-column")
@@ -158,6 +159,19 @@ class MillerColumn(Gtk.Box):
         items.sort(key=sort_key)
         self.store.remove_all()
         self.store.splice(0, 0, items)
+
+        if self._pending_select is not None:
+            target = self._pending_select
+            self._pending_select = None
+            for i, item in enumerate(items):
+                if item.gfile.equal(target):
+                    self.selection.set_selected(i)
+                    self.listview.scroll_to(i, Gtk.ListScrollFlags.NONE, None)
+                    break
+
+    def select_file(self, gfile: Gio.File):
+        """Seleziona `gfile` appena il contenuto è caricato."""
+        self._pending_select = gfile
 
     def set_show_hidden(self, show: bool):
         self.show_hidden = show

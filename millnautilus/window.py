@@ -126,12 +126,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.preview_toggle = Gtk.ToggleButton(
             icon_name="image-x-generic-symbolic", active=True,
             tooltip_text="Anteprima", css_classes=["circular"])
-        info_toggle = Gtk.ToggleButton(
+        self.info_toggle = Gtk.ToggleButton(
             icon_name="dialog-information-symbolic", group=self.preview_toggle,
             tooltip_text="Informazioni", css_classes=["circular"])
         toggle_box = Gtk.Box(spacing=6)
         toggle_box.append(self.preview_toggle)
-        toggle_box.append(info_toggle)
+        toggle_box.append(self.info_toggle)
         header.pack_end(toggle_box)
         self.preview_toggle.connect("toggled", self._on_mode_toggled)
 
@@ -226,6 +226,14 @@ class MainWindow(Adw.ApplicationWindow):
 
     def navigate_to(self, gfile: Gio.File):
         self.miller.set_root(gfile)
+
+    def reveal(self, gfile: Gio.File, info: bool = False):
+        """Mostra la cartella genitore con `gfile` selezionato (D-Bus)."""
+        self.miller.reveal(gfile)
+        if info:
+            self.info_toggle.set_active(True)
+        else:
+            self.preview_toggle.set_active(True)
 
     def _after_op(self, error, message="Fatto"):
         if error:

@@ -61,6 +61,22 @@ update-desktop-database ~/.local/share/applications/ 2>/dev/null || true
 
 Il file usa l'icona `system-file-manager` del tema in uso (la stessa famiglia di Nautilus). Se sposti il progetto, aggiorna i percorsi `Exec=` e `Path=` nel file .desktop.
 
+## Integrazione D-Bus (FileManager1)
+
+L'app espone `org.freedesktop.FileManager1` (usata da GNOME Shell e dai browser
+per "Mostra nella cartella"): `ShowFolders`, `ShowItems` (seleziona il file) e
+`ShowItemProperties` (apre il pannello informazioni).
+
+Per l'attivazione automatica quando l'app non è in esecuzione:
+
+```bash
+mkdir -p ~/.local/share/dbus-1/services
+cp org.freedesktop.FileManager1.service ~/.local/share/dbus-1/services/
+```
+
+Nota: se Nautilus è in esecuzione, il nome D-Bus resta suo finché non viene
+chiuso (`nautilus -q`); Millnautilus lo acquisisce al primo avvio successivo.
+
 ## Note
 
 - L'anteprima PDF/documenti usa le thumbnail generate dal sistema (`thumbnail::path`); se non esiste ancora una thumbnail viene mostrata l'icona del tipo file
