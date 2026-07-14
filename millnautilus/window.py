@@ -122,18 +122,24 @@ class MainWindow(Adw.ApplicationWindow):
         up_btn.connect("clicked", self._on_go_up)
         header.pack_start(up_btn)
 
-        # toggle preview / info: due pulsanti circolari separati
+        # toggle preview / info / visibilità pannello: pulsanti circolari
         self.preview_toggle = Gtk.ToggleButton(
             icon_name="image-x-generic-symbolic", active=True,
             tooltip_text="Anteprima", css_classes=["circular"])
         self.info_toggle = Gtk.ToggleButton(
             icon_name="dialog-information-symbolic", group=self.preview_toggle,
             tooltip_text="Informazioni", css_classes=["circular"])
+        self.panel_toggle = Gtk.ToggleButton(
+            icon_name=self._panel_icon_name(), active=True,
+            tooltip_text="Mostra/nascondi pannello laterale",
+            css_classes=["circular"])
         toggle_box = Gtk.Box(spacing=6)
         toggle_box.append(self.preview_toggle)
         toggle_box.append(self.info_toggle)
+        toggle_box.append(self.panel_toggle)
         header.pack_end(toggle_box)
         self.preview_toggle.connect("toggled", self._on_mode_toggled)
+        self.panel_toggle.connect("toggled", self._on_panel_toggled)
 
         menu = Gio.Menu()
         menu.append("Mostra file nascosti", "win.show-hidden")
@@ -269,8 +275,24 @@ class MainWindow(Adw.ApplicationWindow):
             if parent:
                 self.navigate_to(parent)
 
+    def _panel_icon_name(self) -> str:
+        """Prima icona disponibile nel tema per 'pannello destro'."""
+        theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+        for name in ("sidebar-show-right-symbolic",
+                     "view-sidebar-end-symbolic",
+                     "view-right-pane-symbolic"):
+            if theme.has_icon(name):
+                return name
+        return "view-paged-symbolic"
+
     def _on_mode_toggled(self, toggle):
         self.preview.set_mode("preview" if toggle.get_active() else "info")
+        # cambiare modalità riapre il pannello se era nascosto
+        if not self.panel_toggle.get_active():
+            self.panel_toggle.set_active(True)
+
+    def _on_panel_toggled(self, toggle):
+        self.preview.set_visible(toggle.get_active())
 
     def _on_show_hidden(self, action, value):
         action.set_state(value)

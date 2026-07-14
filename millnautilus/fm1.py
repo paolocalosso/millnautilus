@@ -2,6 +2,8 @@
 
 Usata da GNOME Shell, browser ("Mostra nella cartella"), ecc.
 """
+import sys
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -39,25 +41,40 @@ class FileManager1:
         self._reg_id = 0
         self._own_id = 0
 
-    def register(self, connection: Gio.DBusConnection):
-        node = Gio.DBusNodeInfo.new_for_xml(FM1_XML)
-        self._reg_id = connection.register_object(
-            FM1_PATH, node.interfaces[0], self._on_method_call, None, None)
+    def own(self):
+        """Richiede il nome FileManager1 sul bus di sessione."""
         # REPLACE funziona solo se l'attuale proprietario (es. Nautilus)
         # consente la sostituzione; altrimenti il nome resta a lui finché gira
-        self._own_id = Gio.bus_own_name_on_connection(
-            connection, FM1_NAME,
+        self._own_id = Gio.bus_own_name(
+            Gio.BusType.SESSION, FM1_NAME,
             Gio.BusNameOwnerFlags.ALLOW_REPLACEMENT
             | Gio.BusNameOwnerFlags.REPLACE,
-            None, None)
+            self._on_bus_acquired, self._on_name_acquired,
+            self._on_name_lost)
 
-    def unregister(self, connection: Gio.DBusConnection):
-        if self._reg_id:
-            connection.unregister_object(self._reg_id)
-            self._reg_id = 0
+    def unown(self):
         if self._own_id:
             Gio.bus_unown_name(self._own_id)
             self._own_id = 0
+
+    def _on_bus_acquired(self, connection, name):
+        try:
+            node = Gio.DBusNodeInfo.new_for_xml(FM1_XML)
+            self._reg_id = connection.register_object(
+                FM1_PATH, node.interfaces[0], self._on_method_call,
+                None, None)
+        except GLib.Error as err:
+            print(f"FileManager1: registrazione oggetto fallita: "
+                  f"{err.message}", file=sys.stderr)
+
+    @staticmethod
+    def _on_name_acquired(connection, name):
+        print(f"FileManager1: nome '{name}' acquisito", file=sys.stderr)
+
+    @staticmethod
+    def _on_name_lost(connection, name):
+        print(f"FileManager1: nome '{name}' non disponibile "
+              "(un altro file manager lo possiede?)", file=sys.stderr)
 
     # ------------------------------------------------------------ chiamate
     def _on_method_call(self, connection, sender, path, iface, method,

@@ -19,14 +19,13 @@ class MillnautilusApp(Adw.Application):
         self._fm1 = FileManager1(self)
         self._add_actions()
 
-    def do_dbus_register(self, connection, object_path):
-        Gio.Application.do_dbus_register(self, connection, object_path)
-        self._fm1.register(connection)
-        return True
+    def do_startup(self):
+        Adw.Application.do_startup(self)
+        self._fm1.own()
 
-    def do_dbus_unregister(self, connection, object_path):
-        self._fm1.unregister(connection)
-        Gio.Application.do_dbus_unregister(self, connection, object_path)
+    def do_shutdown(self):
+        self._fm1.unown()
+        Adw.Application.do_shutdown(self)
 
     def _add_actions(self):
         about = Gio.SimpleAction.new("about", None)
