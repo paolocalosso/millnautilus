@@ -41,6 +41,12 @@ CSS = """
 }
 .row-menu-button:hover { opacity: 1; }
 
+/* chip dei preferiti nella vista Computer */
+.fav-chip {
+  padding: 6px 14px;
+  border-radius: 9999px;
+}
+
 /* maniglia di ridimensionamento colonna */
 .column-handle { background: transparent; }
 .column-handle:hover { background: alpha(currentColor, 0.15); }
@@ -84,7 +90,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._apply_state(state)
         self.connect("close-request", self._on_close_request)
 
-        self.miller.set_root(Gio.File.new_for_path(GLib.get_home_dir()))
+        self.show_computer()
 
     # ------------------------------------------------------------ stato
     @staticmethod

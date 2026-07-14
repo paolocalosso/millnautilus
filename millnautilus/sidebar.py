@@ -259,7 +259,8 @@ class Sidebar(Gtk.Box):
             row.set_header(None)
 
     # ------------------------------------------------------------ preferiti
-    def _read_bookmarks(self):
+    @staticmethod
+    def _read_bookmarks():
         bookmarks = []
         try:
             with open(BOOKMARKS_FILE, encoding="utf-8") as fh:

@@ -6,6 +6,8 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
+from .sidebar import Sidebar  # noqa: E402
+
 FS_ATTRS = "filesystem::size,filesystem::free"
 
 REMOTE_SCHEMES = ("sftp", "ssh", "smb", "ftp", "dav", "davs", "nfs")
@@ -65,6 +67,38 @@ class ComputerView(Gtk.ScrolledWindow):
             (network if scheme in REMOTE_SCHEMES else disks).append(card)
         self._section("Dischi", disks)
         self._section("Rete", network)
+        self._favorites_section()
+
+    def _favorites_section(self):
+        bookmarks = Sidebar._read_bookmarks()
+        if not bookmarks:
+            return
+        label = Gtk.Label(label="Preferiti", xalign=0,
+                          margin_top=14, margin_bottom=4)
+        label.add_css_class("heading")
+        label.add_css_class("dim-label")
+        flow = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,
+                           column_spacing=8, row_spacing=8,
+                           homogeneous=False, max_children_per_line=5,
+                           min_children_per_line=1)
+        for uri, title in bookmarks:
+            flow.append(self._favorite_chip(uri, title))
+        self.box.append(label)
+        self.box.append(flow)
+
+    def _favorite_chip(self, uri: str, title: str) -> Gtk.Button:
+        content = Gtk.Box(spacing=8)
+        content.append(Gtk.Image.new_from_icon_name("starred-symbolic"))
+        name = Gtk.Label(label=title,
+                         ellipsize=Pango.EllipsizeMode.END, max_width_chars=24)
+        content.append(name)
+        chip = Gtk.Button(css_classes=["card", "fav-chip"])
+        chip.set_child(content)
+        chip.connect(
+            "clicked",
+            lambda *_: self.emit("location-selected",
+                                 Gio.File.new_for_uri(uri)))
+        return chip
 
     def _section(self, title: str, cards: list):
         cards = [c for c in cards if c is not None]
