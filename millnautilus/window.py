@@ -219,7 +219,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.miller.connect("files-dropped", self._on_files_dropped)
 
         pane = Gtk.Box(css_classes=["content-pane", "view"],
-                       margin_top=6, margin_bottom=12,
+                       margin_top=0, margin_bottom=12,
                        margin_start=12, margin_end=6, hexpand=True)
         pane.set_overflow(Gtk.Overflow.HIDDEN)
         pane.set_size_request(280, -1)
@@ -236,7 +236,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.preview = PreviewPanel()
         self.preview.connect("step",
                              lambda _p, delta: self.miller.step_selection(delta))
-        self.preview.set_margin_top(6)
+        self.preview.set_margin_top(0)
         self.preview.set_margin_bottom(12)
         self.preview.set_margin_end(12)
         self.preview.set_margin_start(6)
