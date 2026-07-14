@@ -66,6 +66,19 @@ class PathBar(Gtk.Stack):
         self.entry.set_text(gfile.get_path() or gfile.get_uri())
         self._rebuild_buttons(gfile)
 
+    def set_placeholder(self, label: str):
+        """Mostra una singola etichetta non navigabile (es. "Computer")."""
+        self._location = None
+        self.entry.set_text("")
+        while (child := self.buttons_box.get_first_child()) is not None:
+            self.buttons_box.remove(child)
+        placeholder = Gtk.Label(label=label)
+        placeholder.add_css_class("heading")
+        placeholder.set_margin_start(8)
+        placeholder.set_margin_end(8)
+        self.buttons_box.append(placeholder)
+        self.set_visible_child_name("buttons")
+
     def start_edit(self):
         self.set_visible_child_name("entry")
         self.entry.grab_focus()

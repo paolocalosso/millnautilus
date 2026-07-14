@@ -87,6 +87,11 @@ class Sidebar(Gtk.Box):
             self.listbox.remove(row)
 
         # Posizioni principali
+        computer_row = SidebarRow("computer-symbolic", "Computer", None,
+                                  action="show-computer")
+        computer_row.section = "Posizioni"
+        self.listbox.append(computer_row)
+
         home = Gio.File.new_for_path(GLib.get_home_dir())
         self._add("user-home-symbolic", "Home", home, section="Posizioni")
         for icon, label, xdg_dir in [
@@ -313,6 +318,10 @@ class Sidebar(Gtk.Box):
     def _on_row_activated(self, listbox, row: SidebarRow):
         if row.action == "connect-server":
             self._connect_server_dialog()
+        elif row.action == "show-computer":
+            win = self.get_root()
+            if hasattr(win, "show_computer"):
+                win.show_computer()
         elif row.gfile is not None:
             self.emit("location-selected", row.gfile)
         elif row.volume is not None:

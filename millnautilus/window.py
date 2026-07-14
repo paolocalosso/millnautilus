@@ -10,6 +10,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from . import fileops  # noqa: E402
+from .computer import ComputerView  # noqa: E402
 from .miller import MillerView  # noqa: E402
 from .models import FileItem  # noqa: E402
 from .pathbar import PathBar  # noqa: E402
@@ -216,7 +217,14 @@ class MainWindow(Adw.ApplicationWindow):
                        margin_start=12, margin_end=6, hexpand=True)
         pane.set_overflow(Gtk.Overflow.HIDDEN)
         pane.set_size_request(280, -1)
-        pane.append(self.miller)
+
+        self.computer = ComputerView()
+        self.computer.connect("location-selected",
+                              lambda _c, f: self.navigate_to(f))
+        self.view_stack = Gtk.Stack(hexpand=True)
+        self.view_stack.add_named(self.miller, "miller")
+        self.view_stack.add_named(self.computer, "computer")
+        pane.append(self.view_stack)
         self.content_pane = pane
 
         self.preview = PreviewPanel()
@@ -291,7 +299,17 @@ class MainWindow(Adw.ApplicationWindow):
         return self.miller.current_dir
 
     def navigate_to(self, gfile: Gio.File):
+        self.view_stack.set_visible_child_name("miller")
         self.miller.set_root(gfile)
+
+    def show_computer(self):
+        """Mostra la panoramica risorse in stile "My Computer"."""
+        self.computer.refresh()
+        self.view_stack.set_visible_child_name("computer")
+        self.pathbar.set_placeholder("Computer")
+        self.set_title("Computer")
+        self.preview.set_file(None)
+        self.preview.set_position(0, 0)
 
     def reveal(self, gfile: Gio.File, info: bool = False):
         """Mostra la cartella genitore con `gfile` selezionato (D-Bus)."""
