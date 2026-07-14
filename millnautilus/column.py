@@ -6,6 +6,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import (Gdk, Gio, GLib, GObject, Graphene,  # noqa: E402
                            Gtk, Pango)
 
+from . import sortprefs  # noqa: E402
 from .models import FILE_ATTRS, FileItem, sort_items  # noqa: E402
 
 COLUMN_WIDTH = 230
@@ -66,8 +67,8 @@ class MillerColumn(Gtk.Box):
         self._all_items: list[FileItem] = []
         self._icon_theme: Gtk.IconTheme | None = None
         self._pending_select: Gio.File | None = None
-        self._sort_by = "name"
-        self._sort_desc = False
+        self._sort_by, self._sort_desc = sortprefs.get_sort(
+            directory.get_uri())
 
         self.set_size_request(COLUMN_WIDTH, -1)
         self.add_css_class("miller-column")
@@ -106,11 +107,12 @@ class MillerColumn(Gtk.Box):
     def _setup_sort_actions(self):
         group = Gio.SimpleActionGroup()
         sort_by = Gio.SimpleAction.new_stateful(
-            "sort-by", GLib.VariantType("s"), GLib.Variant("s", "name"))
+            "sort-by", GLib.VariantType("s"),
+            GLib.Variant("s", self._sort_by))
         sort_by.connect("change-state", self._on_sort_by)
         group.add_action(sort_by)
         sort_desc = Gio.SimpleAction.new_stateful(
-            "sort-desc", None, GLib.Variant("b", False))
+            "sort-desc", None, GLib.Variant("b", self._sort_desc))
         sort_desc.connect("change-state", self._on_sort_desc)
         group.add_action(sort_desc)
         self.insert_action_group("col", group)
@@ -139,12 +141,18 @@ class MillerColumn(Gtk.Box):
     def _on_sort_by(self, action, value):
         action.set_state(value)
         self._sort_by = value.get_string()
+        self._save_sort()
         self._populate()
 
     def _on_sort_desc(self, action, value):
         action.set_state(value)
         self._sort_desc = value.get_boolean()
+        self._save_sort()
         self._populate()
+
+    def _save_sort(self):
+        sortprefs.set_sort(self.directory.get_uri(),
+                           self._sort_by, self._sort_desc)
 
     def _build_resize_handle(self) -> Gtk.Box:
         """Maniglia sul bordo destro per ridimensionare la colonna."""
