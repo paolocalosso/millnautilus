@@ -220,6 +220,7 @@ class PreviewPanel(Gtk.Box):
              or item.content_type),
             ("Dimensione", item.size_str),
             ("Modificato", item.modified_str),
+            ("Creato", item.created_str),
             ("Permessi", item.permissions_str),
             ("Proprietario", item.owner_str),
             ("Percorso", item.path_str),

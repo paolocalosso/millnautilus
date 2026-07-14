@@ -47,6 +47,15 @@ CSS = """
   border-radius: 9999px;
 }
 
+/* pulsante ordinamento colonna */
+menubutton.column-sort-button > button {
+  min-height: 22px;
+  min-width: 22px;
+  padding: 0px 6px;
+  opacity: 0.55;
+}
+menubutton.column-sort-button > button:hover { opacity: 1; }
+
 /* maniglia di ridimensionamento colonna */
 .column-handle { background: transparent; }
 .column-handle:hover { background: alpha(currentColor, 0.15); }

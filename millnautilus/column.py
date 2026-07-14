@@ -6,7 +6,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import (Gdk, Gio, GLib, GObject, Graphene,  # noqa: E402
                            Gtk, Pango)
 
-from .models import FILE_ATTRS, FileItem, sort_key  # noqa: E402
+from .models import FILE_ATTRS, FileItem, sort_items  # noqa: E402
 
 COLUMN_WIDTH = 230
 
@@ -66,12 +66,16 @@ class MillerColumn(Gtk.Box):
         self._all_items: list[FileItem] = []
         self._icon_theme: Gtk.IconTheme | None = None
         self._pending_select: Gio.File | None = None
+        self._sort_by = "name"
+        self._sort_desc = False
 
         self.set_size_request(COLUMN_WIDTH, -1)
         self.add_css_class("miller-column")
 
         self._content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
                                 hexpand=True)
+        self._setup_sort_actions()
+        self._content.append(self._build_sort_header())
 
         self.store = Gio.ListStore(item_type=FileItem)
         self.selection = Gtk.SingleSelection(model=self.store,
@@ -97,6 +101,50 @@ class MillerColumn(Gtk.Box):
 
         self._setup_drop_target()
         self.reload()
+
+    # ------------------------------------------------------------ ordinamento
+    def _setup_sort_actions(self):
+        group = Gio.SimpleActionGroup()
+        sort_by = Gio.SimpleAction.new_stateful(
+            "sort-by", GLib.VariantType("s"), GLib.Variant("s", "name"))
+        sort_by.connect("change-state", self._on_sort_by)
+        group.add_action(sort_by)
+        sort_desc = Gio.SimpleAction.new_stateful(
+            "sort-desc", None, GLib.Variant("b", False))
+        sort_desc.connect("change-state", self._on_sort_desc)
+        group.add_action(sort_desc)
+        self.insert_action_group("col", group)
+
+    def _build_sort_header(self) -> Gtk.Box:
+        menu = Gio.Menu()
+        section = Gio.Menu()
+        section.append("Nome", "col.sort-by::name")
+        section.append("Dimensione", "col.sort-by::size")
+        section.append("Data creazione", "col.sort-by::created")
+        section.append("Data modifica", "col.sort-by::modified")
+        menu.append_section(None, section)
+        section2 = Gio.Menu()
+        section2.append("Ordine decrescente", "col.sort-desc")
+        menu.append_section(None, section2)
+
+        self.sort_btn = Gtk.MenuButton(
+            icon_name="view-sort-descending-symbolic",
+            menu_model=menu, halign=Gtk.Align.END, hexpand=True,
+            tooltip_text="Ordinamento colonna",
+            css_classes=["flat", "column-sort-button"])
+        header = Gtk.Box()
+        header.append(self.sort_btn)
+        return header
+
+    def _on_sort_by(self, action, value):
+        action.set_state(value)
+        self._sort_by = value.get_string()
+        self._populate()
+
+    def _on_sort_desc(self, action, value):
+        action.set_state(value)
+        self._sort_desc = value.get_boolean()
+        self._populate()
 
     def _build_resize_handle(self) -> Gtk.Box:
         """Maniglia sul bordo destro per ridimensionare la colonna."""
@@ -159,7 +207,7 @@ class MillerColumn(Gtk.Box):
     def _populate(self):
         items = [i for i in self._all_items
                  if self.show_hidden or not i.is_hidden]
-        items.sort(key=sort_key)
+        items = sort_items(items, self._sort_by, self._sort_desc)
         self.store.remove_all()
         self.store.splice(0, 0, items)
 
