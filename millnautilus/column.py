@@ -240,6 +240,9 @@ class MillerColumn(Gtk.Box):
         box.icon = Gtk.Image(pixel_size=24)
         box.label = Gtk.Label(xalign=0, hexpand=True,
                               ellipsize=Pango.EllipsizeMode.END)
+        box.date = Gtk.Label(xalign=1)
+        box.date.add_css_class("dim-label")
+        box.date.add_css_class("caption")
         box.menu_btn = Gtk.Button(icon_name="view-more-symbolic",
                                   valign=Gtk.Align.CENTER,
                                   css_classes=["flat", "circular",
@@ -247,6 +250,7 @@ class MillerColumn(Gtk.Box):
         box.menu_btn.connect("clicked", self._on_row_menu_clicked, list_item)
         box.append(box.icon)
         box.append(box.label)
+        box.append(box.date)
         box.append(box.menu_btn)
         list_item.set_child(box)
 
@@ -263,6 +267,7 @@ class MillerColumn(Gtk.Box):
         box = list_item.get_child()
         box.icon.set_from_paintable(self._lookup_icon(item))
         box.label.set_text(item.name)
+        box.date.set_text(item.modified_compact)
         box.menu_btn.set_visible(item.is_dir)
 
     def _lookup_icon(self, item: FileItem):

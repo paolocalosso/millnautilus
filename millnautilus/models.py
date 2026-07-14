@@ -62,6 +62,18 @@ class FileItem(GObject.Object):
         return dt.to_unix() if dt else 0
 
     @property
+    def modified_compact(self) -> str:
+        """Data breve per le righe: "12 lug" nell'anno corrente,
+        altrimenti "12/07/24"."""
+        dt = self.info.get_modification_date_time()
+        if not dt:
+            return ""
+        now = GLib.DateTime.new_now_local()
+        if dt.get_year() == now.get_year():
+            return dt.format("%d %b")
+        return dt.format("%d/%m/%y")
+
+    @property
     def created_str(self) -> str:
         dt = self.info.get_creation_date_time()
         return dt.format("%d/%m/%Y %H:%M") if dt else "—"
