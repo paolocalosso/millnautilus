@@ -63,15 +63,15 @@ class FileItem(GObject.Object):
 
     @property
     def modified_compact(self) -> str:
-        """Data breve per le righe: "12 lug" nell'anno corrente,
-        altrimenti "12/07/24"."""
+        """Data e ora brevi per le righe: "12 lug 14:30" nell'anno
+        corrente, altrimenti "12/07/24 14:30"."""
         dt = self.info.get_modification_date_time()
         if not dt:
             return ""
         now = GLib.DateTime.new_now_local()
         if dt.get_year() == now.get_year():
-            return dt.format("%d %b")
-        return dt.format("%d/%m/%y")
+            return dt.format("%d %b %H:%M")
+        return dt.format("%d/%m/%y %H:%M")
 
     @property
     def created_str(self) -> str:
