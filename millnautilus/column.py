@@ -13,16 +13,19 @@ COLUMN_WIDTH = 230
 CONTEXT_MENU_XML = [
     ("Apri", "win.open-item"),
     ("Apri con…", "win.open-with"),
+    ("Apri in una nuova finestra", "win.open-new-window"),
     None,
     ("Copia", "win.copy"),
     ("Taglia", "win.cut"),
     ("Incolla", "win.paste"),
+    ("Copia percorso", "win.copy-path"),
     None,
     ("Rinomina…", "win.rename"),
     ("Sposta nel cestino", "win.trash"),
     None,
     ("Nuova cartella…", "win.new-folder"),
     ("Aggiungi ai preferiti", "win.bookmark"),
+    ("Proprietà", "win.properties"),
 ]
 
 
@@ -189,11 +192,14 @@ class MillerColumn(Gtk.Box):
         box.icon = Gtk.Image(pixel_size=24)
         box.label = Gtk.Label(xalign=0, hexpand=True,
                               ellipsize=Pango.EllipsizeMode.END)
-        box.chevron = Gtk.Image.new_from_icon_name("go-next-symbolic")
-        box.chevron.add_css_class("dim-label")
+        box.menu_btn = Gtk.Button(icon_name="view-more-symbolic",
+                                  valign=Gtk.Align.CENTER,
+                                  css_classes=["flat", "circular",
+                                               "row-menu-button"])
+        box.menu_btn.connect("clicked", self._on_row_menu_clicked, list_item)
         box.append(box.icon)
         box.append(box.label)
-        box.append(box.chevron)
+        box.append(box.menu_btn)
         list_item.set_child(box)
 
         gesture = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
@@ -209,7 +215,7 @@ class MillerColumn(Gtk.Box):
         box = list_item.get_child()
         box.icon.set_from_paintable(self._lookup_icon(item))
         box.label.set_text(item.name)
-        box.chevron.set_visible(item.is_dir)
+        box.menu_btn.set_visible(item.is_dir)
 
     def _lookup_icon(self, item: FileItem):
         """Cerca l'icona a taglia grande (64px): il tema seleziona la
@@ -230,17 +236,23 @@ class MillerColumn(Gtk.Box):
         if item:
             self.emit("item-activated", item)
 
-    def _on_right_click(self, gesture, n_press, x, y, list_item):
-        position = list_item.get_position()
-        self.selection.set_selected(position)
+    def _popup_context_menu(self, list_item, anchor: Gtk.Widget):
+        """Seleziona la riga e apre il menu contestuale ancorato a `anchor`."""
+        self.selection.set_selected(list_item.get_position())
         win = self.get_root()
         if hasattr(win, "set_context_item"):
             win.set_context_item(list_item.get_item(), self)
         popover = Gtk.PopoverMenu.new_from_model(build_context_menu())
-        popover.set_parent(list_item.get_child())
+        popover.set_parent(anchor)
         popover.set_has_arrow(False)
         popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
         popover.popup()
+
+    def _on_right_click(self, gesture, n_press, x, y, list_item):
+        self._popup_context_menu(list_item, list_item.get_child())
+
+    def _on_row_menu_clicked(self, button, list_item):
+        self._popup_context_menu(list_item, button)
 
     def get_selected(self) -> FileItem | None:
         return self.selection.get_selected_item()

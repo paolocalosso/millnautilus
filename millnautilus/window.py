@@ -28,6 +28,15 @@ CSS = """
 }
 .miller-column { border-right: 1px solid alpha(currentColor, 0.12); }
 
+/* pulsantino menu (⋯) sulle righe cartella */
+.row-menu-button {
+  padding: 0;
+  min-width: 24px;
+  min-height: 24px;
+  opacity: 0.55;
+}
+.row-menu-button:hover { opacity: 1; }
+
 /* maniglia di ridimensionamento colonna */
 .column-handle { background: transparent; }
 .column-handle:hover { background: alpha(currentColor, 0.15); }
@@ -195,6 +204,9 @@ class MainWindow(Adw.ApplicationWindow):
             ("new-folder", self._on_new_folder, ["<Ctrl><Shift>n"]),
             ("open-item", self._on_open_item, None),
             ("open-with", self._on_open_with, None),
+            ("open-new-window", self._on_open_new_window, ["<Ctrl>n"]),
+            ("copy-path", self._on_copy_path, None),
+            ("properties", self._on_properties, ["<Alt>Return"]),
             ("bookmark", self._on_bookmark, None),
             ("reload", lambda *_: self.miller.reload_all(), ["<Ctrl>r", "F5"]),
             ("edit-location", lambda *_: self.pathbar.start_edit(),
@@ -393,6 +405,28 @@ class MainWindow(Adw.ApplicationWindow):
         except AttributeError:
             pass
         launcher.launch(self, None, self._on_launch_done)
+
+    def _on_open_new_window(self, *_):
+        item = self._target_item()
+        gfile = (item.gfile if item and item.is_dir
+                 else self._target_dir())
+        if gfile is None:
+            return
+        win = MainWindow(application=self.get_application())
+        win.present()
+        win.navigate_to(gfile)
+
+    def _on_copy_path(self, *_):
+        item = self._target_item()
+        if item:
+            self.get_clipboard().set(item.path_str)
+            self.show_toast("Percorso copiato")
+
+    def _on_properties(self, *_):
+        self.panel_toggle.set_active(True)
+        self.info_toggle.set_active(True)
+        # forza il refresh se la modalità info era già attiva
+        self.preview.set_mode("info")
 
     def _on_bookmark(self, *_):
         item = self._target_item()
