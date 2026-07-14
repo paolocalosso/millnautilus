@@ -2,6 +2,8 @@
 
 File explorer GTK4/libadwaita con vista a colonne (Miller view), ispirato a Nautilus.
 
+![Millnautilus](screenshot.png)
+
 ## Funzionalità
 
 - **Miller columns**: navigazione a colonne affiancate; selezionando una cartella si apre la colonna successiva
