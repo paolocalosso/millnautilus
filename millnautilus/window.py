@@ -172,6 +172,7 @@ class MainWindow(Adw.ApplicationWindow):
         pane.set_overflow(Gtk.Overflow.HIDDEN)
         pane.set_size_request(280, -1)
         pane.append(self.miller)
+        self.content_pane = pane
 
         self.preview = PreviewPanel()
         self.preview.set_margin_top(12)
@@ -304,7 +305,10 @@ class MainWindow(Adw.ApplicationWindow):
             self.panel_toggle.set_active(True)
 
     def _on_panel_toggled(self, toggle):
-        self.preview.set_visible(toggle.get_active())
+        visible = toggle.get_active()
+        self.preview.set_visible(visible)
+        # a pannello nascosto il margine destro pareggia gli altri (12px)
+        self.content_pane.set_margin_end(6 if visible else 12)
 
     def _on_show_hidden(self, action, value):
         action.set_state(value)
