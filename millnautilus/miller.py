@@ -122,3 +122,31 @@ class MillerView(Gtk.ScrolledWindow):
             if sel is not None:
                 return sel
         return None
+
+    def _selected_column(self) -> MillerColumn | None:
+        for col in reversed(self.columns):
+            if col.get_selected() is not None:
+                return col
+        return None
+
+    def step_selection(self, delta: int):
+        """Sposta la selezione di `delta` nella colonna attiva."""
+        col = self._selected_column()
+        if col is None:
+            if self.columns and self.columns[-1].store.get_n_items() > 0:
+                col = self.columns[-1]
+                col.selection.set_selected(0)
+                col.listview.scroll_to(0, Gtk.ListScrollFlags.NONE, None)
+            return
+        pos = col.selection.get_selected()
+        new = pos + delta
+        if 0 <= new < col.store.get_n_items():
+            col.selection.set_selected(new)
+            col.listview.scroll_to(new, Gtk.ListScrollFlags.NONE, None)
+
+    def selection_info(self) -> tuple[int, int]:
+        """(indice 1-based, totale) nella colonna attiva, o (0, 0)."""
+        col = self._selected_column()
+        if col is None:
+            return (0, 0)
+        return (col.selection.get_selected() + 1, col.store.get_n_items())

@@ -4,7 +4,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from .models import FileItem  # noqa: E402
 
@@ -18,6 +18,11 @@ TEXT_LIKE = ("application/json", "application/xml", "application/x-shellscript",
 class PreviewPanel(Gtk.Box):
     """Stack con due pagine: 'preview' e 'info', selezionabili dall'esterno."""
 
+    __gsignals__ = {
+        # richiesta di scorrere la selezione: delta (+1 / -1)
+        "step": (GObject.SignalFlags.RUN_FIRST, None, (int,)),
+    }
+
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.set_size_request(PANEL_WIDTH, -1)
@@ -30,8 +35,40 @@ class PreviewPanel(Gtk.Box):
         self.stack.add_named(self._build_preview_page(), "preview")
         self.stack.add_named(self._build_info_page(), "info")
         self.append(self.stack)
+        self.append(self._build_nav_bar())
 
         self.mode = "preview"  # o "info"
+
+    def _build_nav_bar(self) -> Gtk.Box:
+        self.nav_bar = Gtk.Box(spacing=12, halign=Gtk.Align.CENTER,
+                               margin_top=6, margin_bottom=6)
+        self.prev_btn = Gtk.Button(icon_name="go-previous-symbolic",
+                                   tooltip_text="Elemento precedente",
+                                   css_classes=["flat", "circular"])
+        self.prev_btn.connect("clicked", lambda *_: self.emit("step", -1))
+        self.next_btn = Gtk.Button(icon_name="go-next-symbolic",
+                                   tooltip_text="Elemento successivo",
+                                   css_classes=["flat", "circular"])
+        self.next_btn.connect("clicked", lambda *_: self.emit("step", 1))
+        self.position_label = Gtk.Label()
+        self.position_label.add_css_class("dim-label")
+        self.position_label.add_css_class("caption")
+
+        self.nav_bar.append(self.prev_btn)
+        self.nav_bar.append(self.position_label)
+        self.nav_bar.append(self.next_btn)
+        self.nav_bar.set_visible(False)
+        return self.nav_bar
+
+    def set_position(self, index: int, total: int):
+        """Aggiorna indicatore e sensibilità frecce (index 1-based)."""
+        if total <= 0 or index <= 0:
+            self.nav_bar.set_visible(False)
+            return
+        self.nav_bar.set_visible(True)
+        self.position_label.set_text(f"{index} / {total}")
+        self.prev_btn.set_sensitive(index > 1)
+        self.next_btn.set_sensitive(index < total)
 
     # ------------------------------------------------------------ API
     def set_mode(self, mode: str):

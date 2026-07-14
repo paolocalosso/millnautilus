@@ -175,6 +175,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.content_pane = pane
 
         self.preview = PreviewPanel()
+        self.preview.connect("step",
+                             lambda _p, delta: self.miller.step_selection(delta))
         self.preview.set_margin_top(12)
         self.preview.set_margin_bottom(12)
         self.preview.set_margin_end(12)
@@ -267,6 +269,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_selection_changed(self, _miller, item):
         self._context_item = None
         self.preview.set_file(item)
+        self.preview.set_position(*self.miller.selection_info())
 
     def _on_location_changed(self, _miller, gfile: Gio.File):
         self.pathbar.set_location(gfile)
