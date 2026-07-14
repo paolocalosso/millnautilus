@@ -115,37 +115,46 @@ class Sidebar(Gtk.Box):
         self._add("drive-harddisk-symbolic", "File system",
                   Gio.File.new_for_path("/"), section="Posizioni")
 
-        # Dispositivi (volumi montabili + mount attivi)
+        # Dispositivi e Rete: raccogli prima, poi aggiungi raggruppati
+        # per sezione (così ogni intestazione compare una sola volta)
+        device_rows, network_rows = [], []
         seen_mounts = set()
         for volume in self.monitor.get_volumes():
             mount = volume.get_mount()
             if mount:
                 seen_mounts.add(mount.get_root().get_uri())
-            icon = "drive-removable-media-symbolic"
-            row = SidebarRow(icon, volume.get_name(),
+            row = SidebarRow("drive-removable-media-symbolic",
+                             volume.get_name(),
                              mount.get_root() if mount else None,
                              volume=volume, mount=mount)
-            row.section = "Dispositivi"
-            self._attach_menu(row)
-            self.listbox.append(row)
+            device_rows.append(row)
         for mount in self.monitor.get_mounts():
             root = mount.get_root()
             if root.get_uri() in seen_mounts:
                 continue
             scheme = root.get_uri_scheme() or ""
-            icon = ("folder-remote-symbolic" if scheme in
-                    ("sftp", "ssh", "smb", "ftp", "dav", "davs", "nfs")
+            is_remote = scheme in ("sftp", "ssh", "smb", "ftp",
+                                   "dav", "davs", "nfs")
+            icon = ("folder-remote-symbolic" if is_remote
                     else "drive-removable-media-symbolic")
-            section = "Rete" if scheme not in ("file", "") else "Dispositivi"
-            self._add(icon, mount.get_name(), root, section=section,
-                      mount=mount)
+            row = SidebarRow(icon, mount.get_name(), root, mount=mount)
+            (network_rows if is_remote else device_rows).append(row)
 
-        # Rete
         connect_row = SidebarRow("network-server-symbolic",
                                  "Connetti al server…", None,
                                  action="connect-server")
-        connect_row.section = "Rete"
-        self.listbox.append(connect_row)
+        network_rows.append(connect_row)
+
+        for row in device_rows:
+            row.section = "Dispositivi"
+            if row.action is None:
+                self._attach_menu(row)
+            self.listbox.append(row)
+        for row in network_rows:
+            row.section = "Rete"
+            if row.action is None:
+                self._attach_menu(row)
+            self.listbox.append(row)
 
         # Preferiti
         for uri, label in self._read_bookmarks():
