@@ -1,4 +1,7 @@
 """Finestra principale."""
+import json
+import os
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -57,10 +60,16 @@ paned > separator.wide {
 """
 
 
+STATE_FILE = os.path.join(GLib.get_user_config_dir(),
+                          "millnautilus", "state.json")
+
+
 class MainWindow(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
+        state = self._load_state()
         super().__init__(**kwargs, title="Millnautilus",
-                         default_width=1200, default_height=720)
+                         default_width=state.get("width", 1200),
+                         default_height=state.get("height", 720))
         self._load_css()
 
         # clipboard interna: (list[Gio.File], cut)
@@ -71,8 +80,44 @@ class MainWindow(Adw.ApplicationWindow):
 
         self._build_ui()
         self._add_actions()
+        self._apply_state(state)
+        self.connect("close-request", self._on_close_request)
 
         self.miller.set_root(Gio.File.new_for_path(GLib.get_home_dir()))
+
+    # ------------------------------------------------------------ stato
+    @staticmethod
+    def _load_state() -> dict:
+        try:
+            with open(STATE_FILE, encoding="utf-8") as fh:
+                return json.load(fh)
+        except (OSError, ValueError):
+            return {}
+
+    def _apply_state(self, state: dict):
+        if state.get("maximized"):
+            self.maximize()
+        if "sidebar_position" in state:
+            self.paned.set_position(state["sidebar_position"])
+        if not state.get("panel_visible", True):
+            self.panel_toggle.set_active(False)
+
+    def _on_close_request(self, *_):
+        width, height = self.get_default_size()
+        state = {
+            "width": width,
+            "height": height,
+            "maximized": self.is_maximized(),
+            "sidebar_position": self.paned.get_position(),
+            "panel_visible": self.panel_toggle.get_active(),
+        }
+        try:
+            os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+            with open(STATE_FILE, "w", encoding="utf-8") as fh:
+                json.dump(state, fh)
+        except OSError:
+            pass
+        return False  # prosegui con la chiusura
 
     # ------------------------------------------------------------ UI
     def _load_css(self):
