@@ -143,8 +143,8 @@ class MainWindow(Adw.ApplicationWindow):
             tooltip_text="Mostra/nascondi pannello laterale",
             css_classes=["circular"])
         toggle_box = Gtk.Box(spacing=6)
-        toggle_box.append(self.preview_toggle)
         toggle_box.append(self.info_toggle)
+        toggle_box.append(self.preview_toggle)
         toggle_box.append(self.panel_toggle)
         header.pack_end(toggle_box)
         self.preview_toggle.connect("toggled", self._on_mode_toggled)
