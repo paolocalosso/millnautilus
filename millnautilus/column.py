@@ -356,11 +356,17 @@ class MillerColumn(Gtk.Box):
         win = self.get_root()
         if hasattr(win, "set_context_dir"):
             win.set_context_dir(self.directory, self)
+        # ancora il popover all'intera colonna (la listview può essere
+        # molto bassa e GTK ridurrebbe il menu aggiungendo scrollbar)
+        point = Graphene.Point()
+        point.init(x, y)
+        ok, translated = self.listview.compute_point(self, point)
+        px, py = (translated.x, translated.y) if ok else (x, y)
         popover = Gtk.PopoverMenu.new_from_model(build_background_menu())
-        popover.set_parent(self.listview)
+        popover.set_parent(self)
         popover.set_has_arrow(False)
         rect = Gdk.Rectangle()
-        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+        rect.x, rect.y, rect.width, rect.height = int(px), int(py), 1, 1
         popover.set_pointing_to(rect)
         popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
         popover.popup()
