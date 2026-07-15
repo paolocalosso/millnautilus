@@ -93,6 +93,8 @@ class MainWindow(Adw.ApplicationWindow):
         # elemento su cui è stato aperto il menu contestuale
         self._context_item: FileItem | None = None
         self._context_column = None
+        # directory del menu contestuale su sfondo colonna
+        self._context_dir: Gio.File | None = None
 
         self._build_ui()
         self._add_actions()
@@ -223,6 +225,8 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.miller = MillerView()
         self.miller.connect("selection-changed", self._on_selection_changed)
+        self.miller.connect("multi-selection-changed",
+                            self._on_multi_selection_changed)
         self.miller.connect("location-changed", self._on_location_changed)
         self.miller.connect("file-activated", self._on_file_activated)
         self.miller.connect("files-dropped", self._on_files_dropped)
@@ -273,6 +277,7 @@ class MainWindow(Adw.ApplicationWindow):
             ("rename", self._on_rename, ["F2"]),
             ("trash", self._on_trash, ["Delete"]),
             ("new-folder", self._on_new_folder, ["<Ctrl><Shift>n"]),
+            ("select-all", self._on_select_all, ["<Ctrl>a"]),
             ("open-item", self._on_open_item, None),
             ("open-with", self._on_open_with, None),
             ("open-new-window", self._on_open_new_window, ["<Ctrl>n"]),
@@ -300,14 +305,28 @@ class MainWindow(Adw.ApplicationWindow):
     def show_toast(self, message: str):
         self.toast_overlay.add_toast(Adw.Toast(title=message))
 
-    def set_context_item(self, item: FileItem, column):
+    def set_context_item(self, item: FileItem | None, column):
         self._context_item = item
+        self._context_column = column
+        self._context_dir = None
+
+    def set_context_dir(self, directory: Gio.File, column):
+        self._context_dir = directory
+        self._context_item = None
         self._context_column = column
 
     def _target_item(self) -> FileItem | None:
-        return self._context_item or self.miller.get_selected()
+        items = self._target_items()
+        return items[0] if items else None
+
+    def _target_items(self) -> list[FileItem]:
+        if self._context_item is not None:
+            return [self._context_item]
+        return self.miller.get_selected_items()
 
     def _target_dir(self) -> Gio.File | None:
+        if self._context_dir is not None:
+            return self._context_dir
         item = self._target_item()
         if item and item.is_dir:
             return item.gfile
@@ -346,8 +365,22 @@ class MainWindow(Adw.ApplicationWindow):
     # ------------------------------------------------------------ callbacks
     def _on_selection_changed(self, _miller, item):
         self._context_item = None
+        self._context_dir = None
         self.preview.set_file(item)
         self.preview.set_position(*self.miller.selection_info())
+
+    def _on_multi_selection_changed(self, _miller, count: int):
+        self._context_item = None
+        self._context_dir = None
+        self.preview.show_multi(count)
+        self.preview.set_position(0, 0)
+
+    def _on_select_all(self, *_):
+        col = self._context_column
+        if col not in self.miller.columns:
+            col = self.miller.active_column()
+        if col is not None:
+            col.select_all()
 
     def _on_location_changed(self, _miller, gfile: Gio.File):
         self.pathbar.set_location(gfile)
@@ -396,17 +429,22 @@ class MainWindow(Adw.ApplicationWindow):
         self.miller.set_show_hidden(value.get_boolean())
 
     # --- clipboard
+    @staticmethod
+    def _describe(items: list[FileItem]) -> str:
+        return (items[0].name if len(items) == 1
+                else f"{len(items)} elementi")
+
     def _on_copy(self, *_):
-        item = self._target_item()
-        if item:
-            self._clipboard = ([item.gfile], False)
-            self.show_toast(f"Copiato: {item.name}")
+        items = self._target_items()
+        if items:
+            self._clipboard = ([i.gfile for i in items], False)
+            self.show_toast(f"Copiato: {self._describe(items)}")
 
     def _on_cut(self, *_):
-        item = self._target_item()
-        if item:
-            self._clipboard = ([item.gfile], True)
-            self.show_toast(f"Tagliato: {item.name}")
+        items = self._target_items()
+        if items:
+            self._clipboard = ([i.gfile for i in items], True)
+            self.show_toast(f"Tagliato: {self._describe(items)}")
 
     def _on_paste(self, *_):
         if not self._clipboard:
@@ -424,13 +462,17 @@ class MainWindow(Adw.ApplicationWindow):
 
     # --- operazioni
     def _on_trash(self, *_):
-        item = self._target_item()
-        if item:
-            fileops.trash([item.gfile],
+        items = self._target_items()
+        if items:
+            fileops.trash([i.gfile for i in items],
                           lambda err: self._after_op(err, "Spostato nel cestino"))
 
     def _on_rename(self, *_):
-        item = self._target_item()
+        items = self._target_items()
+        if len(items) > 1:
+            self.show_toast("Seleziona un solo elemento da rinominare")
+            return
+        item = items[0] if items else None
         if not item:
             return
         dialog = Adw.AlertDialog(heading="Rinomina",
@@ -453,7 +495,7 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.present(self)
 
     def _on_new_folder(self, *_):
-        dest = self.miller.current_dir
+        dest = self._context_dir or self.miller.current_dir
         if dest is None:
             return
         dialog = Adw.AlertDialog(heading="Nuova cartella")
@@ -476,8 +518,7 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.present(self)
 
     def _on_open_item(self, *_):
-        item = self._target_item()
-        if item:
+        for item in self._target_items():
             self._on_file_activated(None, item)
 
     def _on_open_with(self, *_):
@@ -502,10 +543,12 @@ class MainWindow(Adw.ApplicationWindow):
         win.navigate_to(gfile)
 
     def _on_copy_path(self, *_):
-        item = self._target_item()
-        if item:
-            self.get_clipboard().set(item.path_str)
-            self.show_toast("Percorso copiato")
+        items = self._target_items()
+        if items:
+            self.get_clipboard().set(
+                "\n".join(i.path_str for i in items))
+            self.show_toast("Percorso copiato" if len(items) == 1
+                            else f"{len(items)} percorsi copiati")
 
     def _on_properties(self, *_):
         self.panel_toggle.set_active(True)
@@ -516,10 +559,15 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_bookmark(self, *_):
         item = self._target_item()
         if item and item.is_dir:
-            Sidebar.add_bookmark(item.gfile, item.name)
-            self.show_toast(f"Aggiunto ai preferiti: {item.name}")
+            gfile, name = item.gfile, item.name
         else:
-            self.show_toast("Seleziona una cartella")
+            gfile = self._target_dir()
+            if gfile is None:
+                self.show_toast("Seleziona una cartella")
+                return
+            name = gfile.get_basename() or gfile.get_uri()
+        Sidebar.add_bookmark(gfile, name)
+        self.show_toast(f"Aggiunto ai preferiti: {name}")
 
     def _on_files_dropped(self, _miller, files, dest_dir, move):
         fileops.transfer(list(files), dest_dir, move=move,

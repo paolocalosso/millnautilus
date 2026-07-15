@@ -15,6 +15,9 @@ class MillerView(Gtk.ScrolledWindow):
     __gsignals__ = {
         # FileItem selezionato in una colonna qualsiasi (o None)
         "selection-changed": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
+        # selezione multipla: numero elementi
+        "multi-selection-changed": (GObject.SignalFlags.RUN_FIRST, None,
+                                    (int,)),
         # cambia la posizione corrente (Gio.File)
         "location-changed": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
         # doppio click su file non-directory
@@ -71,6 +74,7 @@ class MillerView(Gtk.ScrolledWindow):
         col = MillerColumn(directory, depth=len(self.columns),
                            show_hidden=self.show_hidden)
         col.connect("item-selected", self._on_item_selected)
+        col.connect("multi-selected", self._on_multi_selected)
         col.connect("item-activated", self._on_item_activated)
         col.connect("files-dropped",
                     lambda c, files, move:
@@ -95,6 +99,11 @@ class MillerView(Gtk.ScrolledWindow):
         else:
             self.emit("location-changed", column.directory)
         self.emit("selection-changed", item)
+
+    def _on_multi_selected(self, column: MillerColumn, count: int):
+        self._truncate(column.depth + 1)
+        self.emit("location-changed", column.directory)
+        self.emit("multi-selection-changed", count)
 
     def _on_item_activated(self, column: MillerColumn, item: FileItem):
         if not item.is_dir:
@@ -123,30 +132,41 @@ class MillerView(Gtk.ScrolledWindow):
                 return sel
         return None
 
+    def get_selected_items(self) -> list[FileItem]:
+        """Elementi selezionati nella colonna attiva (anche multipli)."""
+        for col in reversed(self.columns):
+            items = col.get_selected_items()
+            if items:
+                return items
+        return []
+
     def _selected_column(self) -> MillerColumn | None:
         for col in reversed(self.columns):
-            if col.get_selected() is not None:
+            if col.get_selected_items():
                 return col
         return None
+
+    def active_column(self) -> MillerColumn | None:
+        return self._selected_column() or (
+            self.columns[-1] if self.columns else None)
 
     def step_selection(self, delta: int):
         """Sposta la selezione di `delta` nella colonna attiva."""
         col = self._selected_column()
         if col is None:
             if self.columns and self.columns[-1].store.get_n_items() > 0:
-                col = self.columns[-1]
-                col.selection.set_selected(0)
-                col.listview.scroll_to(0, Gtk.ListScrollFlags.NONE, None)
+                self.columns[-1].select_position(0)
             return
-        pos = col.selection.get_selected()
+        pos = col.selected_position()
+        if pos is None:
+            return
         new = pos + delta
         if 0 <= new < col.store.get_n_items():
-            col.selection.set_selected(new)
-            col.listview.scroll_to(new, Gtk.ListScrollFlags.NONE, None)
+            col.select_position(new)
 
     def selection_info(self) -> tuple[int, int]:
         """(indice 1-based, totale) nella colonna attiva, o (0, 0)."""
         col = self._selected_column()
-        if col is None:
+        if col is None or len(col.get_selected_items()) != 1:
             return (0, 0)
-        return (col.selection.get_selected() + 1, col.store.get_n_items())
+        return (col.selected_position() + 1, col.store.get_n_items())

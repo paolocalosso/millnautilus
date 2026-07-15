@@ -43,12 +43,31 @@ def build_context_menu() -> Gio.Menu:
     return menu
 
 
+def build_background_menu() -> Gio.Menu:
+    """Menu per il click destro sullo sfondo della colonna."""
+    menu = Gio.Menu()
+    section1 = Gio.Menu()
+    section1.append("Incolla", "win.paste")
+    section1.append("Nuova cartella…", "win.new-folder")
+    menu.append_section(None, section1)
+    section2 = Gio.Menu()
+    section2.append("Seleziona tutto", "win.select-all")
+    section2.append("Ricarica", "win.reload")
+    menu.append_section(None, section2)
+    section3 = Gio.Menu()
+    section3.append("Aggiungi ai preferiti", "win.bookmark")
+    menu.append_section(None, section3)
+    return menu
+
+
 class MillerColumn(Gtk.Box):
     """Colonna: elenco di un singolo direttorio."""
 
     __gsignals__ = {
-        # FileItem selezionato (o None)
+        # FileItem selezionato (esattamente uno)
         "item-selected": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
+        # selezione multipla: numero elementi
+        "multi-selected": (GObject.SignalFlags.RUN_FIRST, None, (int,)),
         # doppio click / Enter su un file
         "item-activated": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
         # richiesta drop di file in questa cartella: (list[Gio.File], move)
@@ -79,10 +98,8 @@ class MillerColumn(Gtk.Box):
         self._content.append(self._build_sort_header())
 
         self.store = Gio.ListStore(item_type=FileItem)
-        self.selection = Gtk.SingleSelection(model=self.store,
-                                             autoselect=False,
-                                             can_unselect=True)
-        self.selection.connect("notify::selected-item", self._on_selection)
+        self.selection = Gtk.MultiSelection(model=self.store)
+        self.selection.connect("selection-changed", self._on_selection)
 
         factory = Gtk.SignalListItemFactory()
         factory.connect("setup", self._on_setup)
@@ -90,8 +107,13 @@ class MillerColumn(Gtk.Box):
 
         self.listview = Gtk.ListView(model=self.selection, factory=factory)
         self.listview.set_single_click_activate(False)
+        self.listview.set_enable_rubberband(True)
         self.listview.connect("activate", self._on_activate)
         self.listview.add_css_class("navigation-sidebar")
+
+        bg_gesture = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+        bg_gesture.connect("pressed", self._on_background_click)
+        self.listview.add_controller(bg_gesture)
 
         scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,
                                       vexpand=True)
@@ -224,8 +246,7 @@ class MillerColumn(Gtk.Box):
             self._pending_select = None
             for i, item in enumerate(items):
                 if item.gfile.equal(target):
-                    self.selection.set_selected(i)
-                    self.listview.scroll_to(i, Gtk.ListScrollFlags.NONE, None)
+                    self.select_position(i)
                     break
 
     def select_file(self, gfile: Gio.File):
@@ -289,8 +310,13 @@ class MillerColumn(Gtk.Box):
             self.get_direction(), 0)
 
     # ------------------------------------------------------------ interazione
-    def _on_selection(self, selection, _pspec):
-        self.emit("item-selected", selection.get_selected_item())
+    def _on_selection(self, _model, _position, _n_items):
+        items = self.get_selected_items()
+        if len(items) == 1:
+            self.emit("item-selected", items[0])
+        elif len(items) > 1:
+            self.emit("multi-selected", len(items))
+        # 0 elementi: nessuna emissione (evita collassi spurii nei reload)
 
     def _on_activate(self, listview, position):
         item = self.store.get_item(position)
@@ -299,10 +325,18 @@ class MillerColumn(Gtk.Box):
 
     def _popup_context_menu(self, list_item, anchor: Gtk.Widget):
         """Seleziona la riga e apre il menu contestuale ancorato a `anchor`."""
-        self.selection.set_selected(list_item.get_position())
+        position = list_item.get_position()
+        if not self.selection.is_selected(position):
+            self.selection.select_item(position, True)
         win = self.get_root()
         if hasattr(win, "set_context_item"):
-            win.set_context_item(list_item.get_item(), self)
+            selected = self.get_selected_items()
+            if list_item.get_item() in selected and len(selected) > 1:
+                # click destro su selezione multipla: le azioni agiscono
+                # su tutti gli elementi selezionati
+                win.set_context_item(None, self)
+            else:
+                win.set_context_item(list_item.get_item(), self)
         popover = Gtk.PopoverMenu.new_from_model(build_context_menu())
         popover.set_parent(anchor)
         popover.set_has_arrow(False)
@@ -315,16 +349,56 @@ class MillerColumn(Gtk.Box):
     def _on_row_menu_clicked(self, button, list_item):
         self._popup_context_menu(list_item, button)
 
+    def _on_background_click(self, gesture, n_press, x, y):
+        picked = self.listview.pick(x, y, Gtk.PickFlags.DEFAULT)
+        if picked is not self.listview:
+            return  # click su una riga: gestito dal menu della riga
+        win = self.get_root()
+        if hasattr(win, "set_context_dir"):
+            win.set_context_dir(self.directory, self)
+        popover = Gtk.PopoverMenu.new_from_model(build_background_menu())
+        popover.set_parent(self.listview)
+        popover.set_has_arrow(False)
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+        popover.set_pointing_to(rect)
+        popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
+        popover.popup()
+
+    # ------------------------------------------------------------ selezione
+    def get_selected_items(self) -> list[FileItem]:
+        bitset = self.selection.get_selection()
+        return [self.store.get_item(bitset.get_nth(i))
+                for i in range(bitset.get_size())]
+
     def get_selected(self) -> FileItem | None:
-        return self.selection.get_selected_item()
+        """L'elemento selezionato, solo se la selezione è singola."""
+        items = self.get_selected_items()
+        return items[0] if len(items) == 1 else None
+
+    def selected_position(self) -> int | None:
+        bitset = self.selection.get_selection()
+        return bitset.get_nth(0) if bitset.get_size() > 0 else None
+
+    def select_position(self, position: int):
+        self.selection.select_item(position, True)
+        self.listview.scroll_to(position, Gtk.ListScrollFlags.NONE, None)
+
+    def select_all(self):
+        self.selection.select_all()
 
     # ------------------------------------------------------------ drag & drop
     def _on_drag_prepare(self, source, x, y, list_item):
         item: FileItem = list_item.get_item()
         if item is None:
             return None
+        selected = self.get_selected_items()
+        if item in selected and len(selected) > 1:
+            files = [i.gfile for i in selected]
+        else:
+            files = [item.gfile]
         try:
-            file_list = Gdk.FileList.new_from_list([item.gfile])
+            file_list = Gdk.FileList.new_from_list(files)
             return Gdk.ContentProvider.new_for_value(file_list)
         except Exception:
             return Gdk.ContentProvider.new_for_value(item.uri)

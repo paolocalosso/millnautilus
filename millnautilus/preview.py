@@ -79,7 +79,20 @@ class PreviewPanel(Gtk.Box):
         self._cancellable.cancel()
         self._cancellable = Gio.Cancellable()
         self._item = item
+        self.placeholder.set_title("Nessuna selezione")
+        self.placeholder.set_description(
+            "Seleziona un file per vederne l'anteprima o le informazioni")
         self._refresh()
+
+    def show_multi(self, count: int):
+        """Mostra il placeholder per una selezione multipla."""
+        self._cancellable.cancel()
+        self._cancellable = Gio.Cancellable()
+        self._item = None
+        self.placeholder.set_title(f"{count} elementi selezionati")
+        self.placeholder.set_description(
+            "Le operazioni agiranno su tutti gli elementi selezionati")
+        self.stack.set_visible_child_name("empty")
 
     def _refresh(self):
         if self._item is None:
@@ -93,10 +106,12 @@ class PreviewPanel(Gtk.Box):
 
     # ------------------------------------------------------------ pagine
     def _build_placeholder(self):
-        return Adw.StatusPage(icon_name="view-paged-symbolic",
-                              title="Nessuna selezione",
-                              description="Seleziona un file per vederne "
-                                          "l'anteprima o le informazioni")
+        self.placeholder = Adw.StatusPage(
+            icon_name="view-paged-symbolic",
+            title="Nessuna selezione",
+            description="Seleziona un file per vederne "
+                        "l'anteprima o le informazioni")
+        return self.placeholder
 
     def _build_preview_page(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
