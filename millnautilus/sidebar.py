@@ -8,6 +8,8 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
+from . import pinned  # noqa: E402
+
 BOOKMARKS_FILE = os.path.join(GLib.get_user_config_dir(),
                               "gtk-3.0", "bookmarks")
 
@@ -74,6 +76,8 @@ class Sidebar(Gtk.Box):
             ("open", self._ctx_open),
             ("bookmark-add", self._ctx_bookmark_add),
             ("bookmark-remove", self._ctx_bookmark_remove),
+            ("pin", self._ctx_pin),
+            ("unpin", self._ctx_unpin),
             ("unmount", self._ctx_unmount),
             ("copy-path", self._ctx_copy_path),
         ]:
@@ -111,6 +115,11 @@ class Sidebar(Gtk.Box):
             if path and os.path.isdir(path):
                 self._add(icon, label, Gio.File.new_for_path(path),
                           section="Posizioni")
+        # Cartelle fissate dall'utente (subito dopo le cartelle XDG)
+        for uri, label in pinned.load():
+            self._add("folder-symbolic", label,
+                      Gio.File.new_for_uri(uri), section="Posizioni")
+
         self._add("user-trash-symbolic", "Cestino",
                   Gio.File.new_for_uri("trash:///"), section="Posizioni")
         self._add("drive-harddisk-symbolic", "File system",
@@ -261,6 +270,13 @@ class Sidebar(Gtk.Box):
         elif (row.gfile is not None
               and (row.gfile.get_uri_scheme() or "file") != "trash"):
             section2.append("Aggiungi ai preferiti", "sidebar.bookmark-add")
+        # fissa/sblocca dalle Posizioni (solo cartelle reali)
+        if row.gfile is not None and row.gfile.get_path() is not None:
+            if pinned.is_pinned(row.gfile.get_uri()):
+                section2.append("Rimuovi dalle Posizioni",
+                                "sidebar.unpin")
+            elif (row.gfile.get_uri_scheme() or "file") != "trash":
+                section2.append("Fissa alle Posizioni", "sidebar.pin")
         menu.append_section(None, section2)
 
         mount = row.mount or (row.volume.get_mount() if row.volume else None)
@@ -304,6 +320,20 @@ class Sidebar(Gtk.Box):
         if row and row.gfile is not None:
             self.remove_bookmark(row.gfile)
             self._toast(f"Rimosso dai preferiti: {row.title}")
+            self.refresh()
+
+    def _ctx_pin(self, *_):
+        row = self._context_row
+        if row and row.gfile is not None:
+            pinned.add(row.gfile.get_uri(), row.title)
+            self._toast(f"Fissato alle Posizioni: {row.title}")
+            self.refresh()
+
+    def _ctx_unpin(self, *_):
+        row = self._context_row
+        if row and row.gfile is not None:
+            pinned.remove(row.gfile.get_uri())
+            self._toast(f"Rimosso dalle Posizioni: {row.title}")
             self.refresh()
 
     def _ctx_unmount(self, *_):
