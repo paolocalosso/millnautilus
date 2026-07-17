@@ -156,10 +156,14 @@ class Sidebar(Gtk.Box):
                 self._attach_menu(row)
             self.listbox.append(row)
 
-        # Preferiti
+        # Preferiti (riordinabili via drag & drop)
         for uri, label in self._read_bookmarks():
-            self._add("starred-symbolic", label, Gio.File.new_for_uri(uri),
-                      section="Preferiti")
+            row = SidebarRow("starred-symbolic", label,
+                             Gio.File.new_for_uri(uri))
+            row.section = "Preferiti"
+            self._attach_menu(row)
+            self._make_reorderable(row, uri)
+            self.listbox.append(row)
 
     def _add(self, icon: str, title: str, gfile: Gio.File, section: str,
              mount: Gio.Mount | None = None):
@@ -167,6 +171,48 @@ class Sidebar(Gtk.Box):
         row.section = section
         self._attach_menu(row)
         self.listbox.append(row)
+
+    # ------------------------------------------------------------ riordino
+    def _make_reorderable(self, row: SidebarRow, uri: str):
+        source = Gtk.DragSource(actions=Gdk.DragAction.MOVE)
+        source.connect(
+            "prepare",
+            lambda s, x, y: Gdk.ContentProvider.new_for_value(uri))
+        row.add_controller(source)
+
+        drop = Gtk.DropTarget.new(str, Gdk.DragAction.MOVE)
+        drop.connect("drop", self._on_bookmark_drop, row, uri)
+        row.add_controller(drop)
+
+    def _on_bookmark_drop(self, target, value, x, y, row, target_uri):
+        if not isinstance(value, str) or value == target_uri:
+            return False
+        after = y > row.get_height() / 2
+        self.reorder_bookmark(value, target_uri, after)
+        self.refresh()
+        return True
+
+    @staticmethod
+    def reorder_bookmark(uri: str, target_uri: str, after: bool):
+        """Sposta `uri` prima/dopo `target_uri` nel file bookmarks."""
+        try:
+            with open(BOOKMARKS_FILE, encoding="utf-8") as fh:
+                lines = [l.rstrip("\n") for l in fh if l.strip()]
+        except OSError:
+            return
+        dragged = next((l for l in lines
+                        if l.split(" ", 1)[0] == uri), None)
+        if dragged is None:
+            return
+        lines.remove(dragged)
+        index = next((i for i, l in enumerate(lines)
+                      if l.split(" ", 1)[0] == target_uri), None)
+        if index is None:
+            lines.append(dragged)
+        else:
+            lines.insert(index + 1 if after else index, dragged)
+        with open(BOOKMARKS_FILE, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
 
     # ------------------------------------------------------------ menu ctx
     def _attach_menu(self, row: SidebarRow):
