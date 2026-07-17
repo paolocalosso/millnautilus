@@ -1,6 +1,5 @@
 """Sidebar: posizioni, dispositivi, rete/SFTP, preferiti."""
 import os
-import sys
 
 import gi
 
@@ -197,15 +196,11 @@ class Sidebar(Gtk.Box):
         row.add_controller(drop)
 
     def _on_drag_begin(self, source, drag, row):
-        print("DnD preferiti: drag avviato", file=sys.stderr)
         row.add_css_class("dragging")
         paintable = Gtk.WidgetPaintable.new(row)
         source.set_icon(paintable, 0, 0)
 
     def _on_drop_motion(self, target, x, y, row):
-        if not (row.has_css_class("drop-above")
-                or row.has_css_class("drop-below")):
-            print(f"DnD preferiti: sopra '{row.title}'", file=sys.stderr)
         self._clear_drop_marks(row)
         if y > row.get_height() / 2:
             row.add_css_class("drop-below")
