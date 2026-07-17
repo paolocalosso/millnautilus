@@ -8,7 +8,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import pinned  # noqa: E402
+from . import pinned, places  # noqa: E402
 
 BOOKMARKS_FILE = os.path.join(GLib.get_user_config_dir(),
                               "gtk-3.0", "bookmarks")
@@ -97,9 +97,13 @@ class Sidebar(Gtk.Box):
         computer_row.section = "Posizioni"
         self.listbox.append(computer_row)
 
+        # Gruppo Posizioni ordinabile: Home + cartelle XDG + fissate.
+        # (icona, etichetta, gfile). Costruisco l'elenco, poi applico
+        # l'ordine salvato e rendo tutto riordinabile.
         home = Gio.File.new_for_path(GLib.get_home_dir())
+        entries: list[tuple[str, str, Gio.File]] = [
+            ("user-home-symbolic", "Home", home)]
         self._fixed_uris = {home.get_uri()}
-        self._add("user-home-symbolic", "Home", home, section="Posizioni")
         for icon, label, xdg_dir in [
             ("folder-documents-symbolic", "Documenti",
              GLib.UserDirectory.DIRECTORY_DOCUMENTS),
@@ -116,18 +120,22 @@ class Sidebar(Gtk.Box):
             if path and os.path.isdir(path):
                 gfile = Gio.File.new_for_path(path)
                 self._fixed_uris.add(gfile.get_uri())
-                self._add(icon, label, gfile, section="Posizioni")
-        # Cartelle fissate dall'utente (subito dopo le cartelle XDG,
-        # riordinabili via drag & drop). Salta quelle già presenti come
-        # posizione fissa (evita doppioni).
+                entries.append((icon, label, gfile))
         for uri, label in pinned.load():
             if uri in self._fixed_uris:
                 continue
-            row = SidebarRow("folder-symbolic", label,
-                             Gio.File.new_for_uri(uri))
+            entries.append(("folder-symbolic", label,
+                            Gio.File.new_for_uri(uri)))
+
+        by_uri = {e[2].get_uri(): e for e in entries}
+        ordered_uris = places.apply_order(list(by_uri.keys()))
+        self._place_order = ordered_uris
+        for uri in ordered_uris:
+            icon, label, gfile = by_uri[uri]
+            row = SidebarRow(icon, label, gfile)
             row.section = "Posizioni"
             self._attach_menu(row)
-            self._make_reorderable(row, uri, pinned.reorder, "pinned")
+            self._make_reorderable(row, uri, self._reorder_place, "places")
             self.listbox.append(row)
 
         self._add("user-trash-symbolic", "Cestino",
@@ -232,6 +240,9 @@ class Sidebar(Gtk.Box):
         else:
             row.add_css_class("drop-above")
         return Gdk.DragAction.MOVE
+
+    def _reorder_place(self, dragged_uri: str, target_uri: str, after: bool):
+        places.reorder(self._place_order, dragged_uri, target_uri, after)
 
     def _on_reorder_drop(self, target, value, x, y, row):
         self._clear_drop_marks(row)
