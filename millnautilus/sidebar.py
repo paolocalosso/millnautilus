@@ -173,18 +173,42 @@ class Sidebar(Gtk.Box):
         self.listbox.append(row)
 
     # ------------------------------------------------------------ riordino
+    @staticmethod
+    def _clear_drop_marks(row):
+        row.remove_css_class("drop-above")
+        row.remove_css_class("drop-below")
+
     def _make_reorderable(self, row: SidebarRow, uri: str):
         source = Gtk.DragSource(actions=Gdk.DragAction.MOVE)
         source.connect(
             "prepare",
             lambda s, x, y: Gdk.ContentProvider.new_for_value(uri))
+        source.connect("drag-begin", self._on_drag_begin, row)
+        source.connect("drag-end",
+                       lambda s, d, dm: row.remove_css_class("dragging"))
         row.add_controller(source)
 
         drop = Gtk.DropTarget.new(str, Gdk.DragAction.MOVE)
+        drop.connect("motion", self._on_drop_motion, row)
+        drop.connect("leave", lambda t, r=row: self._clear_drop_marks(r))
         drop.connect("drop", self._on_bookmark_drop, row, uri)
         row.add_controller(drop)
 
+    def _on_drag_begin(self, source, drag, row):
+        row.add_css_class("dragging")
+        paintable = Gtk.WidgetPaintable.new(row)
+        source.set_icon(paintable, 0, 0)
+
+    def _on_drop_motion(self, target, x, y, row):
+        self._clear_drop_marks(row)
+        if y > row.get_height() / 2:
+            row.add_css_class("drop-below")
+        else:
+            row.add_css_class("drop-above")
+        return Gdk.DragAction.MOVE
+
     def _on_bookmark_drop(self, target, value, x, y, row, target_uri):
+        self._clear_drop_marks(row)
         if not isinstance(value, str) or value == target_uri:
             return False
         after = y > row.get_height() / 2

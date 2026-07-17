@@ -41,6 +41,16 @@ CSS = """
 }
 .row-menu-button:hover { opacity: 1; }
 
+/* feedback drag & drop riordino preferiti */
+row.drop-above,
+row.drop-below,
+row.dragging {
+  transition: box-shadow 150ms ease, opacity 150ms ease;
+}
+row.drop-above { box-shadow: inset 0 3px 0 0 @accent_bg_color; }
+row.drop-below { box-shadow: inset 0 -3px 0 0 @accent_bg_color; }
+row.dragging { opacity: 0.35; }
+
 /* chip dei preferiti nella vista Computer */
 .fav-chip {
   padding: 6px 14px;
