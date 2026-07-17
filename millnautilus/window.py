@@ -657,6 +657,9 @@ class MainWindow(Adw.ApplicationWindow):
                 self.show_toast("Seleziona una cartella")
                 return
             name = gfile.get_basename() or gfile.get_uri()
+        if self.sidebar.is_fixed_place(gfile.get_uri()):
+            self.show_toast(f"«{name}» è già tra le Posizioni")
+            return
         pinned.add(gfile.get_uri(), name)
         self.show_toast(f"Fissato alle Posizioni: {name}")
         self.sidebar.refresh()
