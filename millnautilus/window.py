@@ -47,8 +47,8 @@ row.drop-below,
 row.dragging {
   transition: box-shadow 150ms ease, opacity 150ms ease;
 }
-row.drop-above { box-shadow: inset 0 3px 0 0 @accent_bg_color; }
-row.drop-below { box-shadow: inset 0 -3px 0 0 @accent_bg_color; }
+row.drop-above { box-shadow: inset 0 3px 0 0 alpha(currentColor, 0.8); }
+row.drop-below { box-shadow: inset 0 -3px 0 0 alpha(currentColor, 0.8); }
 row.dragging { opacity: 0.35; }
 
 /* chip dei preferiti nella vista Computer */
