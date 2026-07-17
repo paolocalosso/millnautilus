@@ -42,14 +42,11 @@ CSS = """
 .row-menu-button:hover { opacity: 1; }
 
 /* feedback drag & drop riordino preferiti */
-row.drop-above,
-row.drop-below,
-row.dragging {
-  transition: box-shadow 150ms ease, opacity 150ms ease;
-}
-row.drop-above { box-shadow: inset 0 3px 0 0 alpha(currentColor, 0.8); }
-row.drop-below { box-shadow: inset 0 -3px 0 0 alpha(currentColor, 0.8); }
+row.drop-above { border-top: 3px solid alpha(currentColor, 0.8); }
+row.drop-below { border-bottom: 3px solid alpha(currentColor, 0.8); }
 row.dragging { opacity: 0.35; }
+/* evidenziazione automatica GTK del bersaglio di drop */
+row:drop(active) { background: alpha(currentColor, 0.08); }
 
 /* chip dei preferiti nella vista Computer */
 .fav-chip {
