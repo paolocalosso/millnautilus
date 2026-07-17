@@ -394,12 +394,17 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_title(gfile.get_basename() or gfile.get_uri())
 
     def _on_file_activated(self, _miller, item: FileItem):
-        launcher = Gtk.FileLauncher(file=item.gfile)
-        launcher.launch(self, None, self._on_launch_done)
+        """Doppio click: apre con l'app predefinita del tipo, se esiste;
+        altrimenti mostra il selettore "Apri con"."""
+        app_info = Gio.AppInfo.get_default_for_type(item.content_type, False)
+        if app_info is not None:
+            self._launch_with(app_info, [item])
+        else:
+            self._open_with_dialog([item])
 
-    def _on_launch_done(self, launcher, result):
+    def _launch_with(self, app_info: Gio.AppInfo, items: list[FileItem]):
         try:
-            launcher.launch_finish(result)
+            app_info.launch([i.gfile for i in items], None)
         except GLib.Error as err:
             self.show_toast(f"Impossibile aprire: {err.message}")
 
@@ -529,15 +534,79 @@ class MainWindow(Adw.ApplicationWindow):
             self._on_file_activated(None, item)
 
     def _on_open_with(self, *_):
-        item = self._target_item()
-        if not item:
-            return
-        launcher = Gtk.FileLauncher(file=item.gfile)
-        try:
-            launcher.set_always_ask(True)  # GTK >= 4.12
-        except AttributeError:
-            pass
-        launcher.launch(self, None, self._on_launch_done)
+        items = self._target_items()
+        if items:
+            self._open_with_dialog(items)
+
+    def _open_with_dialog(self, items: list[FileItem]):
+        """Dialogo di scelta app con opzione "imposta come predefinita"."""
+        content_type = items[0].content_type
+        desc = (Gio.content_type_get_description(content_type)
+                or content_type)
+        dialog = Adw.AlertDialog(
+            heading="Apri con",
+            body=f"Scegli un'applicazione per i file «{desc}»")
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        listbox = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE,
+                              css_classes=["boxed-list"])
+        scroller = Gtk.ScrolledWindow(min_content_height=260,
+                                      max_content_height=360,
+                                      propagate_natural_height=True)
+        scroller.set_child(listbox)
+        box.append(scroller)
+
+        default_check = Gtk.CheckButton(
+            label="Imposta come applicazione predefinita per questo tipo")
+        box.append(default_check)
+        dialog.set_extra_child(box)
+
+        app_rows: list[tuple[Gtk.ListBoxRow, Gio.AppInfo]] = []
+        recommended = Gio.AppInfo.get_recommended_for_type(content_type)
+        rec_ids = {a.get_id() for a in recommended}
+        others = [a for a in Gio.AppInfo.get_all_for_type(content_type)
+                  if a.get_id() not in rec_ids]
+        for app_info in recommended + others:
+            row = Gtk.ListBoxRow()
+            row_box = Gtk.Box(spacing=10, margin_top=6, margin_bottom=6,
+                              margin_start=10, margin_end=10)
+            icon = app_info.get_icon()
+            if icon:
+                row_box.append(Gtk.Image.new_from_gicon(icon))
+            row_box.append(Gtk.Label(label=app_info.get_display_name(),
+                                     xalign=0))
+            row.set_child(row_box)
+            listbox.append(row)
+            app_rows.append((row, app_info))
+        if app_rows:
+            listbox.select_row(app_rows[0][0])
+
+        listbox.connect(
+            "row-activated",
+            lambda _lb, _r: dialog.response("open"))
+        dialog.add_response("cancel", "Annulla")
+        dialog.add_response("open", "Apri")
+        dialog.set_response_appearance("open",
+                                       Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("open")
+
+        def on_response(_dlg, response):
+            if response != "open":
+                return
+            row = listbox.get_selected_row()
+            app_info = next((a for r, a in app_rows if r is row), None)
+            if app_info is None:
+                return
+            if default_check.get_active():
+                try:
+                    app_info.set_as_default_for_type(content_type)
+                except GLib.Error as err:
+                    self.show_toast(f"Impossibile impostare come "
+                                    f"predefinita: {err.message}")
+            self._launch_with(app_info, items)
+
+        dialog.connect("response", on_response)
+        dialog.present(self)
 
     def _on_open_new_window(self, *_):
         item = self._target_item()
