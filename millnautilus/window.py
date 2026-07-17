@@ -9,7 +9,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import fileops  # noqa: E402
+from . import fileops, pinned  # noqa: E402
 from .computer import ComputerView  # noqa: E402
 from .miller import MillerView  # noqa: E402
 from .models import FileItem  # noqa: E402
@@ -291,6 +291,7 @@ class MainWindow(Adw.ApplicationWindow):
             ("copy-path", self._on_copy_path, None),
             ("properties", self._on_properties, ["<Alt>Return"]),
             ("bookmark", self._on_bookmark, None),
+            ("pin", self._on_pin, None),
             ("reload", lambda *_: self.miller.reload_all(), ["<Ctrl>r", "F5"]),
             ("edit-location", lambda *_: self.pathbar.start_edit(),
              ["<Ctrl>l"]),
@@ -644,6 +645,21 @@ class MainWindow(Adw.ApplicationWindow):
             name = gfile.get_basename() or gfile.get_uri()
         Sidebar.add_bookmark(gfile, name)
         self.show_toast(f"Aggiunto ai preferiti: {name}")
+        self.sidebar.refresh()
+
+    def _on_pin(self, *_):
+        item = self._target_item()
+        if item and item.is_dir:
+            gfile, name = item.gfile, item.name
+        else:
+            gfile = self._target_dir()
+            if gfile is None or gfile.get_path() is None:
+                self.show_toast("Seleziona una cartella")
+                return
+            name = gfile.get_basename() or gfile.get_uri()
+        pinned.add(gfile.get_uri(), name)
+        self.show_toast(f"Fissato alle Posizioni: {name}")
+        self.sidebar.refresh()
 
     def _on_files_dropped(self, _miller, files, dest_dir, move):
         fileops.transfer(list(files), dest_dir, move=move,

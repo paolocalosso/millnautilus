@@ -26,6 +26,7 @@ CONTEXT_MENU_XML = [
     None,
     ("Nuova cartella…", "win.new-folder"),
     ("Aggiungi ai preferiti", "win.bookmark"),
+    ("Fissa alle Posizioni", "win.pin"),
     ("Proprietà", "win.properties"),
 ]
 
@@ -56,6 +57,7 @@ def build_background_menu() -> Gio.Menu:
     menu.append_section(None, section2)
     section3 = Gio.Menu()
     section3.append("Aggiungi ai preferiti", "win.bookmark")
+    section3.append("Fissa alle Posizioni", "win.pin")
     menu.append_section(None, section3)
     return menu
 
