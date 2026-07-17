@@ -115,10 +115,15 @@ class Sidebar(Gtk.Box):
             if path and os.path.isdir(path):
                 self._add(icon, label, Gio.File.new_for_path(path),
                           section="Posizioni")
-        # Cartelle fissate dall'utente (subito dopo le cartelle XDG)
+        # Cartelle fissate dall'utente (subito dopo le cartelle XDG,
+        # riordinabili via drag & drop)
         for uri, label in pinned.load():
-            self._add("folder-symbolic", label,
-                      Gio.File.new_for_uri(uri), section="Posizioni")
+            row = SidebarRow("folder-symbolic", label,
+                             Gio.File.new_for_uri(uri))
+            row.section = "Posizioni"
+            self._attach_menu(row)
+            self._make_reorderable(row, uri, pinned.reorder)
+            self.listbox.append(row)
 
         self._add("user-trash-symbolic", "Cestino",
                   Gio.File.new_for_uri("trash:///"), section="Posizioni")
@@ -172,7 +177,7 @@ class Sidebar(Gtk.Box):
                              Gio.File.new_for_uri(uri))
             row.section = "Preferiti"
             self._attach_menu(row)
-            self._make_reorderable(row, uri)
+            self._make_reorderable(row, uri, self.reorder_bookmark)
             self.listbox.append(row)
 
     def _add(self, icon: str, title: str, gfile: Gio.File, section: str,
@@ -188,7 +193,9 @@ class Sidebar(Gtk.Box):
         row.remove_css_class("drop-above")
         row.remove_css_class("drop-below")
 
-    def _make_reorderable(self, row: SidebarRow, uri: str):
+    def _make_reorderable(self, row: SidebarRow, uri: str, reorder_fn):
+        row.reorder_uri = uri
+        row.reorder_fn = reorder_fn
         source = Gtk.DragSource(actions=Gdk.DragAction.MOVE)
         source.connect(
             "prepare",
@@ -201,7 +208,7 @@ class Sidebar(Gtk.Box):
         drop = Gtk.DropTarget.new(str, Gdk.DragAction.MOVE)
         drop.connect("motion", self._on_drop_motion, row)
         drop.connect("leave", lambda t, r=row: self._clear_drop_marks(r))
-        drop.connect("drop", self._on_bookmark_drop, row, uri)
+        drop.connect("drop", self._on_reorder_drop, row)
         row.add_controller(drop)
 
     def _on_drag_begin(self, source, drag, row):
@@ -217,14 +224,31 @@ class Sidebar(Gtk.Box):
             row.add_css_class("drop-above")
         return Gdk.DragAction.MOVE
 
-    def _on_bookmark_drop(self, target, value, x, y, row, target_uri):
+    def _on_reorder_drop(self, target, value, x, y, row):
         self._clear_drop_marks(row)
-        if not isinstance(value, str) or value == target_uri:
+        target_uri = row.reorder_uri
+        # accetta il drop solo tra righe della stessa sezione riordinabile
+        if (not isinstance(value, str) or value == target_uri
+                or not self._same_reorder_group(value, row)):
             return False
         after = y > row.get_height() / 2
-        self.reorder_bookmark(value, target_uri, after)
+        row.reorder_fn(value, target_uri, after)
         self.refresh()
         return True
+
+    def _same_reorder_group(self, dragged_uri: str, target_row) -> bool:
+        """True se l'elemento trascinato appartiene alla stessa sezione
+        riordinabile della riga bersaglio (posizioni vs preferiti)."""
+        for r in self._iter_rows():
+            if getattr(r, "reorder_uri", None) == dragged_uri:
+                return r.section == target_row.section
+        return False
+
+    def _iter_rows(self):
+        i = 0
+        while (row := self.listbox.get_row_at_index(i)) is not None:
+            yield row
+            i += 1
 
     @staticmethod
     def reorder_bookmark(uri: str, target_uri: str, after: bool):
