@@ -88,6 +88,8 @@ class MillerColumn(Gtk.Box):
         self._all_items: list[FileItem] = []
         self._icon_theme: Gtk.IconTheme | None = None
         self._pending_select: Gio.File | None = None
+        self._status_label: Gtk.Label | None = None
+        self._mount_attempted = False
         self._sort_by, self._sort_desc = sortprefs.get_sort(
             directory.get_uri())
 
@@ -207,6 +209,7 @@ class MillerColumn(Gtk.Box):
         self._cancellable.cancel()
         self._cancellable = Gio.Cancellable()
         self._all_items = []
+        self._clear_status()
         self.store.remove_all()
         self.directory.enumerate_children_async(
             FILE_ATTRS, Gio.FileQueryInfoFlags.NONE, GLib.PRIORITY_DEFAULT,
@@ -216,10 +219,35 @@ class MillerColumn(Gtk.Box):
         try:
             enumerator = gfile.enumerate_children_finish(result)
         except GLib.Error as err:
+            if (err.code == Gio.IOErrorEnum.NOT_MOUNTED
+                    and not self._mount_attempted):
+                self._mount_and_reload()
+                return
             self._show_error(err.message)
             return
+        self._mount_attempted = False
         enumerator.next_files_async(200, GLib.PRIORITY_DEFAULT,
                                     self._cancellable, self._on_next_files)
+
+    def _mount_and_reload(self):
+        """Monta la risorsa (es. sftp:// non montato) e ricarica."""
+        self._mount_attempted = True
+        self._show_status("Montaggio in corso…")
+        win = self.get_root()
+        op = Gtk.MountOperation.new(
+            win if isinstance(win, Gtk.Window) else None)
+
+        def on_mounted(gfile, result):
+            try:
+                gfile.mount_enclosing_volume_finish(result)
+            except GLib.Error as err:
+                if err.code != Gio.IOErrorEnum.ALREADY_MOUNTED:
+                    self._show_error(f"Montaggio fallito: {err.message}")
+                    return
+            self.reload()
+
+        self.directory.mount_enclosing_volume(
+            Gio.MountMountFlags.NONE, op, self._cancellable, on_mounted)
 
     def _on_next_files(self, enumerator, result):
         try:
@@ -260,10 +288,20 @@ class MillerColumn(Gtk.Box):
         self._populate()
 
     def _show_error(self, message: str):
+        self._show_status(message)
+
+    def _show_status(self, message: str):
+        self._clear_status()
         label = Gtk.Label(label=message, wrap=True, margin_top=12,
                           margin_start=8, margin_end=8)
         label.add_css_class("dim-label")
         self._content.prepend(label)
+        self._status_label = label
+
+    def _clear_status(self):
+        if self._status_label is not None:
+            self._content.remove(self._status_label)
+            self._status_label = None
 
     # ------------------------------------------------------------ factory
     def _on_setup(self, factory, list_item):
