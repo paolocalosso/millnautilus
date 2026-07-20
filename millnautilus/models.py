@@ -54,7 +54,7 @@ class FileItem(GObject.Object):
     @property
     def modified_str(self) -> str:
         dt = self.info.get_modification_date_time()
-        return dt.format("%d/%m/%Y %H:%M") if dt else "—"
+        return dt.to_local().format("%d/%m/%Y %H:%M") if dt else "—"
 
     @property
     def modified_ts(self) -> int:
@@ -68,6 +68,7 @@ class FileItem(GObject.Object):
         dt = self.info.get_modification_date_time()
         if not dt:
             return ""
+        dt = dt.to_local()
         now = GLib.DateTime.new_now_local()
         if dt.get_year() == now.get_year():
             return dt.format("%d %b %H:%M")
@@ -76,7 +77,7 @@ class FileItem(GObject.Object):
     @property
     def created_str(self) -> str:
         dt = self.info.get_creation_date_time()
-        return dt.format("%d/%m/%Y %H:%M") if dt else "—"
+        return dt.to_local().format("%d/%m/%Y %H:%M") if dt else "—"
 
     @property
     def created_ts(self) -> int:
