@@ -305,21 +305,26 @@ class MillerColumn(Gtk.Box):
 
     # ------------------------------------------------------------ factory
     def _on_setup(self, factory, list_item):
-        box = Gtk.Box(spacing=8, margin_top=2, margin_bottom=2)
-        box.icon = Gtk.Image(pixel_size=24)
+        box = Gtk.Box(spacing=8, margin_top=3, margin_bottom=3)
+        box.icon = Gtk.Image(pixel_size=24, valign=Gtk.Align.CENTER)
+
+        text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                           valign=Gtk.Align.CENTER, hexpand=True)
         box.label = Gtk.Label(xalign=0, hexpand=True,
                               ellipsize=Pango.EllipsizeMode.END)
-        box.date = Gtk.Label(xalign=1)
+        box.date = Gtk.Label(xalign=0)
         box.date.add_css_class("dim-label")
         box.date.add_css_class("caption")
+        text_box.append(box.label)
+        text_box.append(box.date)
+
         box.menu_btn = Gtk.Button(icon_name="view-more-symbolic",
                                   valign=Gtk.Align.CENTER,
                                   css_classes=["flat", "circular",
                                                "row-menu-button"])
         box.menu_btn.connect("clicked", self._on_row_menu_clicked, list_item)
         box.append(box.icon)
-        box.append(box.label)
-        box.append(box.date)
+        box.append(text_box)
         box.append(box.menu_btn)
         list_item.set_child(box)
 
