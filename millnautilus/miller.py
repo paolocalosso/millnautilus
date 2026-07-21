@@ -91,7 +91,7 @@ class MillerView(Gtk.ScrolledWindow):
         self._scroll_pending = True
         if self._scroll_timeout:
             GLib.source_remove(self._scroll_timeout)
-        self._scroll_timeout = GLib.timeout_add(450, self._end_scroll_window)
+        self._scroll_timeout = GLib.timeout_add(900, self._end_scroll_window)
         GLib.idle_add(self._scroll_to_end)
 
     def _on_hadj_changed(self, _adj):
