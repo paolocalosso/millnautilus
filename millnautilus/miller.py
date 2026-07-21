@@ -35,6 +35,9 @@ class MillerView(Gtk.ScrolledWindow):
         self.set_child(self.box)
         self.columns: list[MillerColumn] = []
         self.root: Gio.File | None = None
+        # scroll automatico all'ultima colonna dopo l'allocazione
+        self._scroll_pending = False
+        self.get_hadjustment().connect("changed", self._on_hadj_changed)
 
     # ------------------------------------------------------------ navigazione
     @property
@@ -81,11 +84,23 @@ class MillerView(Gtk.ScrolledWindow):
                     self.emit("files-dropped", files, c.directory, move))
         self.columns.append(col)
         self.box.append(col)
+        # l'upper dell'aggiustamento si aggiorna solo dopo l'allocazione:
+        # segna lo scroll come pendente e lo eseguo in _on_hadj_changed
+        self._scroll_pending = True
         GLib.idle_add(self._scroll_to_end)
+
+    def _on_hadj_changed(self, _adj):
+        if self._scroll_pending:
+            self._scroll_to_end()
 
     def _scroll_to_end(self):
         adj = self.get_hadjustment()
-        adj.set_value(adj.get_upper() - adj.get_page_size())
+        target = adj.get_upper() - adj.get_page_size()
+        if target > adj.get_value():
+            adj.set_value(target)
+        # scroll completato solo quando il contenuto eccede la vista
+        if adj.get_upper() > adj.get_page_size():
+            self._scroll_pending = False
         return False
 
     # ------------------------------------------------------------ callbacks
