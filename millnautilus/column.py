@@ -6,7 +6,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import (Gdk, Gio, GLib, GObject, Graphene,  # noqa: E402
                            Gtk, Pango)
 
-from . import sortprefs  # noqa: E402
+from . import colwidths, sortprefs  # noqa: E402
 from .models import FILE_ATTRS, FileItem, sort_items  # noqa: E402
 
 COLUMN_WIDTH = 230
@@ -93,7 +93,8 @@ class MillerColumn(Gtk.Box):
         self._sort_by, self._sort_desc = sortprefs.get_sort(
             directory.get_uri())
 
-        self.set_size_request(COLUMN_WIDTH, -1)
+        saved_width = colwidths.get_width(directory.get_uri())
+        self.set_size_request(saved_width or COLUMN_WIDTH, -1)
         self.add_css_class("miller-column")
 
         self._content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
@@ -189,6 +190,7 @@ class MillerColumn(Gtk.Box):
 
         drag = Gtk.GestureDrag()
         drag.connect("drag-update", self._on_resize_drag, handle)
+        drag.connect("drag-end", self._on_resize_end)
         handle.add_controller(drag)
         return handle
 
@@ -203,6 +205,11 @@ class MillerColumn(Gtk.Box):
             return
         width = max(self.MIN_WIDTH, min(self.MAX_WIDTH, int(translated.x)))
         self.set_size_request(width, -1)
+
+    def _on_resize_end(self, gesture, _dx, _dy):
+        width, _ = self.get_size_request()
+        if width > 0:
+            colwidths.set_width(self.directory.get_uri(), width)
 
     # ------------------------------------------------------------ caricamento
     def reload(self):
