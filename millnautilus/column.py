@@ -319,7 +319,7 @@ class MillerColumn(Gtk.Box):
                            valign=Gtk.Align.CENTER, hexpand=True)
         box.label = Gtk.Label(xalign=0, hexpand=True,
                               ellipsize=Pango.EllipsizeMode.END)
-        box.date = Gtk.Label(xalign=0)
+        box.date = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
         box.date.add_css_class("dim-label")
         box.date.add_css_class("caption")
         text_box.append(box.label)
@@ -348,8 +348,30 @@ class MillerColumn(Gtk.Box):
         box = list_item.get_child()
         box.icon.set_from_paintable(self._lookup_icon(item))
         box.label.set_text(item.name)
-        box.date.set_text(item.modified_compact)
         box.menu_btn.set_visible(item.is_dir)
+        # riferimento all'elemento attualmente legato a questa riga: serve a
+        # scartare i conteggi asincroni che arrivano dopo il riciclo della riga
+        box.item = item
+        self._update_meta(box, item)
+        if item.is_dir:
+            item.count_children_async(
+                self._cancellable,
+                lambda _n, b=box, it=item: self._on_count_ready(b, it))
+
+    def _on_count_ready(self, box, item):
+        # aggiorna solo se la riga è ancora legata allo stesso elemento
+        if getattr(box, "item", None) is item:
+            self._update_meta(box, item)
+
+    def _update_meta(self, box, item: FileItem):
+        """Riga secondaria: data di modifica + peso (file) o n. oggetti
+        (cartella)."""
+        extra = item.count_str if item.is_dir else item.size_str
+        date = item.modified_compact
+        if extra and date:
+            box.date.set_text(f"{date}  ·  {extra}")
+        else:
+            box.date.set_text(date or extra)
 
     def _lookup_icon(self, item: FileItem):
         """Cerca l'icona a taglia grande (64px): il tema seleziona la

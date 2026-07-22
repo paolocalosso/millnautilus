@@ -35,10 +35,15 @@ class MillerView(Gtk.ScrolledWindow):
         self.set_child(self.box)
         self.columns: list[MillerColumn] = []
         self.root: Gio.File | None = None
-        # scroll automatico all'ultima colonna dopo l'allocazione
-        self._scroll_pending = False
-        self._scroll_timeout = 0
-        self.get_hadjustment().connect("changed", self._on_hadj_changed)
+        # Colonna che vogliamo tenere a fuoco (l'ultima aperta). Finché è
+        # impostata, la riportiamo a destra a ogni cambio di layout.
+        self._scroll_target: MillerColumn | None = None
+        # True solo mentre siamo noi a spostare lo scroll, per distinguere
+        # dallo scroll manuale dell'utente.
+        self._pinning = False
+        hadj = self.get_hadjustment()
+        hadj.connect("changed", self._on_hadj_changed)
+        hadj.connect("value-changed", self._on_hadj_value_changed)
 
     # ------------------------------------------------------------ navigazione
     @property
@@ -72,6 +77,8 @@ class MillerView(Gtk.ScrolledWindow):
     def _truncate(self, depth: int):
         while len(self.columns) > depth:
             col = self.columns.pop()
+            if col is self._scroll_target:
+                self._scroll_target = None
             self.box.remove(col)
 
     def _add_column(self, directory: Gio.File):
@@ -85,27 +92,35 @@ class MillerView(Gtk.ScrolledWindow):
                     self.emit("files-dropped", files, c.directory, move))
         self.columns.append(col)
         self.box.append(col)
-        # l'upper dell'aggiustamento si aggiorna in più passi durante
-        # l'allocazione: inseguo la fine per una breve finestra temporale,
-        # così l'ultima colonna resta a fuoco anche con molti livelli.
-        self._scroll_pending = True
-        if self._scroll_timeout:
-            GLib.source_remove(self._scroll_timeout)
-        self._scroll_timeout = GLib.timeout_add(900, self._end_scroll_window)
+        # Aggancio l'ultima colonna e la riporto a destra subito (idle) e a
+        # ogni successivo cambio di layout: l'upper dell'aggiustamento cresce
+        # in più passi mentre il contenuto si carica in modo asincrono, ma la
+        # colonna è già a fuoco perché la larghezza è nota da subito. Nessun
+        # timer: il "pin" viene rilasciato solo quando l'utente scorre via.
+        self._scroll_target = col
         GLib.idle_add(self._scroll_to_end)
 
     def _on_hadj_changed(self, _adj):
-        if self._scroll_pending:
+        # Il layout è cambiato (colonna aggiunta/rimossa o finestra
+        # ridimensionata): se stiamo seguendo una colonna, riportala a fuoco.
+        if self._scroll_target is not None:
             self._scroll_to_end()
 
-    def _end_scroll_window(self):
-        self._scroll_pending = False
-        self._scroll_timeout = 0
-        return False
+    def _on_hadj_value_changed(self, adj):
+        # Se lo scroll non è stato impostato da noi ed è visibilmente lontano
+        # dalla fine, l'utente ha scrollato a sinistra: smetto di inseguire.
+        if self._pinning or self._scroll_target is None:
+            return
+        max_value = adj.get_upper() - adj.get_page_size()
+        if adj.get_value() < max_value - 1:
+            self._scroll_target = None
 
     def _scroll_to_end(self):
         adj = self.get_hadjustment()
-        adj.set_value(adj.get_upper() - adj.get_page_size())
+        self._pinning = True
+        adj.set_value(max(adj.get_lower(),
+                          adj.get_upper() - adj.get_page_size()))
+        self._pinning = False
         return False
 
     # ------------------------------------------------------------ callbacks

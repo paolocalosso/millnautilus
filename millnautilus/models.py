@@ -24,6 +24,9 @@ class FileItem(GObject.Object):
         super().__init__()
         self.gfile = gfile
         self.info = info
+        # numero di elementi (solo cartelle): None = non ancora calcolato,
+        # -1 = errore/non leggibile
+        self._child_count: int | None = None
 
     @property
     def name(self) -> str:
@@ -50,6 +53,65 @@ class FileItem(GObject.Object):
         if self.is_dir:
             return "—"
         return GLib.format_size(self.size)
+
+    @property
+    def child_count(self) -> int | None:
+        return self._child_count
+
+    @property
+    def count_str(self) -> str:
+        """Numero di elementi della cartella, es. "8 oggetti"."""
+        n = self._child_count
+        if n is None or n < 0:
+            return ""
+        return "1 oggetto" if n == 1 else f"{n} oggetti"
+
+    def count_children_async(self, cancellable, on_done):
+        """Conta gli elementi non nascosti della cartella (async).
+
+        `on_done(count)` viene invocato quando il conteggio è pronto (subito,
+        se già in cache). Il risultato viene memorizzato su `_child_count`.
+        """
+        if self._child_count is not None:
+            on_done(self._child_count)
+            return
+        if not self.is_dir:
+            self._child_count = -1
+            on_done(-1)
+            return
+
+        counter = {"n": 0}
+
+        def on_next(enumerator, result):
+            try:
+                infos = enumerator.next_files_finish(result)
+            except GLib.Error:
+                on_done(-1)
+                return
+            if not infos:
+                enumerator.close_async(GLib.PRIORITY_DEFAULT, None, None, None)
+                self._child_count = counter["n"]
+                on_done(counter["n"])
+                return
+            for info in infos:
+                if not info.get_is_hidden():
+                    counter["n"] += 1
+            enumerator.next_files_async(200, GLib.PRIORITY_DEFAULT,
+                                        cancellable, on_next)
+
+        def on_enum(gfile, result):
+            try:
+                enumerator = gfile.enumerate_children_finish(result)
+            except GLib.Error:
+                self._child_count = -1
+                on_done(-1)
+                return
+            enumerator.next_files_async(200, GLib.PRIORITY_DEFAULT,
+                                        cancellable, on_next)
+
+        self.gfile.enumerate_children_async(
+            "standard::is-hidden", Gio.FileQueryInfoFlags.NONE,
+            GLib.PRIORITY_DEFAULT, cancellable, on_enum)
 
     @property
     def modified_str(self) -> str:
