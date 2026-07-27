@@ -204,13 +204,15 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.back_btn = Gtk.Button(icon_name="go-previous-symbolic",
                                    tooltip_text="Indietro (Alt+←)",
-                                   sensitive=False)
+                                   sensitive=False,
+                                   css_classes=["circular"])
         self.back_btn.connect("clicked", lambda *_: self._on_back())
         self.forward_btn = Gtk.Button(icon_name="go-next-symbolic",
                                       tooltip_text="Avanti (Alt+→)",
-                                      sensitive=False)
+                                      sensitive=False,
+                                      css_classes=["circular"])
         self.forward_btn.connect("clicked", lambda *_: self._on_forward())
-        nav_box = Gtk.Box(css_classes=["linked"], margin_start=6)
+        nav_box = Gtk.Box(spacing=6, margin_start=6)
         nav_box.append(self.back_btn)
         nav_box.append(self.forward_btn)
         header.pack_start(nav_box)
