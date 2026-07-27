@@ -201,23 +201,12 @@ class MainWindow(Adw.ApplicationWindow):
         up_btn.connect("clicked", self._on_go_up)
         header.pack_start(up_btn)
 
-        # toggle preview / info / visibilità pannello: pulsanti circolari
-        self.preview_toggle = Gtk.ToggleButton(
-            icon_name="image-x-generic-symbolic", active=True,
-            tooltip_text="Anteprima", css_classes=["circular"])
-        self.info_toggle = Gtk.ToggleButton(
-            icon_name="dialog-information-symbolic", group=self.preview_toggle,
-            tooltip_text="Informazioni", css_classes=["circular"])
+        # toggle visibilità pannello destro (anteprima + dettagli)
         self.panel_toggle = Gtk.ToggleButton(
             icon_name=self._panel_icon_name(), active=True,
             tooltip_text="Mostra/nascondi pannello laterale",
             css_classes=["circular"])
-        toggle_box = Gtk.Box(spacing=6)
-        toggle_box.append(self.info_toggle)
-        toggle_box.append(self.preview_toggle)
-        toggle_box.append(self.panel_toggle)
-        header.pack_end(toggle_box)
-        self.preview_toggle.connect("toggled", self._on_mode_toggled)
+        header.pack_end(self.panel_toggle)
         self.panel_toggle.connect("toggled", self._on_panel_toggled)
 
         menu = Gio.Menu()
@@ -357,9 +346,7 @@ class MainWindow(Adw.ApplicationWindow):
         """Mostra la cartella genitore con `gfile` selezionato (D-Bus)."""
         self.miller.reveal(gfile)
         if info:
-            self.info_toggle.set_active(True)
-        else:
-            self.preview_toggle.set_active(True)
+            self.panel_toggle.set_active(True)
 
     def _after_op(self, error, message="Fatto"):
         if error:
@@ -424,12 +411,6 @@ class MainWindow(Adw.ApplicationWindow):
             if theme.has_icon(name):
                 return name
         return "view-paged-symbolic"
-
-    def _on_mode_toggled(self, toggle):
-        self.preview.set_mode("preview" if toggle.get_active() else "info")
-        # cambiare modalità riapre il pannello se era nascosto
-        if not self.panel_toggle.get_active():
-            self.panel_toggle.set_active(True)
 
     def _on_panel_toggled(self, toggle):
         visible = toggle.get_active()
@@ -629,9 +610,6 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_properties(self, *_):
         self.panel_toggle.set_active(True)
-        self.info_toggle.set_active(True)
-        # forza il refresh se la modalità info era già attiva
-        self.preview.set_mode("info")
 
     def _on_bookmark(self, *_):
         item = self._target_item()

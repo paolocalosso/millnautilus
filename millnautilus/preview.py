@@ -16,7 +16,7 @@ TEXT_LIKE = ("application/json", "application/xml", "application/x-shellscript",
 
 
 class PreviewPanel(Gtk.Box):
-    """Stack con due pagine: 'preview' e 'info', selezionabili dall'esterno."""
+    """Pannello destro: anteprima sopra, dettagli sotto (divisorio mobile)."""
 
     __gsignals__ = {
         # richiesta di scorrere la selezione: delta (+1 / -1)
@@ -32,12 +32,21 @@ class PreviewPanel(Gtk.Box):
 
         self.stack = Gtk.Stack(vexpand=True)
         self.stack.add_named(self._build_placeholder(), "empty")
-        self.stack.add_named(self._build_preview_page(), "preview")
-        self.stack.add_named(self._build_info_page(), "info")
+        self.stack.add_named(self._build_content(), "content")
         self.append(self.stack)
         self.append(self._build_nav_bar())
 
-        self.mode = "preview"  # o "info"
+    def _build_content(self) -> Gtk.Paned:
+        """Anteprima sopra, dettagli sotto, separati da un divisorio."""
+        paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL,
+                          position=300, vexpand=True)
+        paned.set_start_child(self._build_preview_page())
+        paned.set_resize_start_child(True)
+        paned.set_shrink_start_child(False)
+        paned.set_end_child(self._build_info_page())
+        paned.set_resize_end_child(False)
+        paned.set_shrink_end_child(False)
+        return paned
 
     def _build_nav_bar(self) -> Gtk.Box:
         self.nav_bar = Gtk.Box(spacing=12, halign=Gtk.Align.CENTER,
@@ -71,10 +80,6 @@ class PreviewPanel(Gtk.Box):
         self.next_btn.set_sensitive(index < total)
 
     # ------------------------------------------------------------ API
-    def set_mode(self, mode: str):
-        self.mode = mode
-        self._refresh()
-
     def set_file(self, item: FileItem | None):
         self._cancellable.cancel()
         self._cancellable = Gio.Cancellable()
@@ -97,12 +102,10 @@ class PreviewPanel(Gtk.Box):
     def _refresh(self):
         if self._item is None:
             self.stack.set_visible_child_name("empty")
-        elif self.mode == "info":
-            self._fill_info(self._item)
-            self.stack.set_visible_child_name("info")
-        else:
-            self._fill_preview(self._item)
-            self.stack.set_visible_child_name("preview")
+            return
+        self._fill_preview(self._item)
+        self._fill_info(self._item)
+        self.stack.set_visible_child_name("content")
 
     # ------------------------------------------------------------ pagine
     def _build_placeholder(self):
@@ -117,6 +120,7 @@ class PreviewPanel(Gtk.Box):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
                       margin_top=12, margin_bottom=12,
                       margin_start=12, margin_end=12)
+        box.set_size_request(-1, 160)
         self.preview_picture = Gtk.Picture(can_shrink=True, vexpand=True,
                                            content_fit=Gtk.ContentFit.CONTAIN)
         self.preview_icon = Gtk.Image(pixel_size=128, vexpand=True,
@@ -146,19 +150,15 @@ class PreviewPanel(Gtk.Box):
 
     def _build_info_page(self):
         scroller = Gtk.ScrolledWindow(
-            vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+            hscrollbar_policy=Gtk.PolicyType.NEVER)
+        scroller.set_size_request(-1, 140)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
-                      margin_top=16, margin_bottom=16,
+                      margin_top=6, margin_bottom=12,
                       margin_start=12, margin_end=12)
-        self.info_icon = Gtk.Image(pixel_size=64)
-        self.info_name = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER)
-        self.info_name.add_css_class("title-3")
 
         self.info_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.info_list.add_css_class("boxed-list")
 
-        box.append(self.info_icon)
-        box.append(self.info_name)
         box.append(self.info_list)
         scroller.set_child(box)
         return scroller
@@ -224,9 +224,6 @@ class PreviewPanel(Gtk.Box):
 
     # ------------------------------------------------------------ info
     def _fill_info(self, item: FileItem):
-        self.info_icon.set_from_paintable(self._lookup_icon(item, 128))
-        self.info_name.set_text(item.name)
-
         while (row := self.info_list.get_row_at_index(0)) is not None:
             self.info_list.remove(row)
 
