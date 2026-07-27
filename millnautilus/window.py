@@ -86,6 +86,9 @@ paned > separator.wide {
 STATE_FILE = os.path.join(GLib.get_user_config_dir(),
                           "millnautilus", "state.json")
 
+# voce di cronologia per la vista "Computer"
+COMPUTER = object()
+
 
 class MainWindow(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
@@ -102,6 +105,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._context_column = None
         # directory del menu contestuale su sfondo colonna
         self._context_dir: Gio.File | None = None
+        # cronologia di navigazione (Gio.File oppure COMPUTER)
+        self._history: list = []
+        self._history_index = -1
 
         self._build_ui()
         self._add_actions()
@@ -196,7 +202,20 @@ class MainWindow(Adw.ApplicationWindow):
             lambda b: self.sidebar_pane.set_visible(b.get_active()))
         header.pack_start(sidebar_btn)
 
-        up_btn = Gtk.Button(icon_name="go-up-symbolic",
+        self.back_btn = Gtk.Button(icon_name="go-previous-symbolic",
+                                   tooltip_text="Indietro (Alt+←)",
+                                   sensitive=False)
+        self.back_btn.connect("clicked", lambda *_: self._on_back())
+        self.forward_btn = Gtk.Button(icon_name="go-next-symbolic",
+                                      tooltip_text="Avanti (Alt+→)",
+                                      sensitive=False)
+        self.forward_btn.connect("clicked", lambda *_: self._on_forward())
+        nav_box = Gtk.Box(css_classes=["linked"], margin_start=6)
+        nav_box.append(self.back_btn)
+        nav_box.append(self.forward_btn)
+        header.pack_start(nav_box)
+
+        up_btn = Gtk.Button(icon_name="go-up-symbolic", margin_start=6,
                             tooltip_text="Cartella superiore")
         up_btn.connect("clicked", self._on_go_up)
         header.pack_start(up_btn)
@@ -284,6 +303,8 @@ class MainWindow(Adw.ApplicationWindow):
             ("reload", lambda *_: self.miller.reload_all(), ["<Ctrl>r", "F5"]),
             ("edit-location", lambda *_: self.pathbar.start_edit(),
              ["<Ctrl>l"]),
+            ("back", self._on_back, ["<Alt>Left"]),
+            ("forward", self._on_forward, ["<Alt>Right"]),
         ]
         for name, callback, accels in actions:
             action = Gio.SimpleAction.new(name, None)
@@ -329,12 +350,16 @@ class MainWindow(Adw.ApplicationWindow):
             return item.gfile
         return self.miller.current_dir
 
-    def navigate_to(self, gfile: Gio.File):
+    def navigate_to(self, gfile: Gio.File, record: bool = True):
+        if record:
+            self._push_history(gfile)
         self.view_stack.set_visible_child_name("miller")
         self.miller.set_root(gfile)
 
-    def show_computer(self):
+    def show_computer(self, record: bool = True):
         """Mostra la panoramica risorse in stile "My Computer"."""
+        if record:
+            self._push_history(COMPUTER)
         self.computer.refresh()
         self.view_stack.set_visible_child_name("computer")
         self.pathbar.set_placeholder("Computer")
@@ -342,8 +367,52 @@ class MainWindow(Adw.ApplicationWindow):
         self.preview.set_file(None)
         self.preview.set_position(0, 0)
 
+    # ------------------------------------------------------------ cronologia
+    def _push_history(self, entry):
+        current = (self._history[self._history_index]
+                   if 0 <= self._history_index < len(self._history) else None)
+        if self._same_entry(current, entry):
+            return
+        del self._history[self._history_index + 1:]
+        self._history.append(entry)
+        self._history_index = len(self._history) - 1
+        self._update_history_buttons()
+
+    @staticmethod
+    def _same_entry(a, b) -> bool:
+        if a is None or b is None:
+            return False
+        if a is COMPUTER or b is COMPUTER:
+            return a is b
+        return a.equal(b)
+
+    def _goto_history(self, index: int):
+        self._history_index = index
+        entry = self._history[index]
+        if entry is COMPUTER:
+            self.show_computer(record=False)
+        else:
+            self.navigate_to(entry, record=False)
+        self._update_history_buttons()
+
+    def _on_back(self, *_):
+        if self._history_index > 0:
+            self._goto_history(self._history_index - 1)
+
+    def _on_forward(self, *_):
+        if self._history_index < len(self._history) - 1:
+            self._goto_history(self._history_index + 1)
+
+    def _update_history_buttons(self):
+        self.back_btn.set_sensitive(self._history_index > 0)
+        self.forward_btn.set_sensitive(
+            self._history_index < len(self._history) - 1)
+
     def reveal(self, gfile: Gio.File, info: bool = False):
         """Mostra la cartella genitore con `gfile` selezionato (D-Bus)."""
+        parent = gfile.get_parent()
+        self._push_history(parent if parent is not None else gfile)
+        self.view_stack.set_visible_child_name("miller")
         self.miller.reveal(gfile)
         if info:
             self.panel_toggle.set_active(True)
