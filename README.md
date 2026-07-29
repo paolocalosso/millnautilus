@@ -63,6 +63,22 @@ update-desktop-database ~/.local/share/applications/ 2>/dev/null || true
 
 Il file usa l'icona `system-file-manager` del tema in uso (la stessa famiglia di Nautilus). Se sposti il progetto, aggiorna i percorsi `Exec=` e `Path=` nel file .desktop.
 
+## Impostare come file manager predefinito
+
+```bash
+xdg-mime default millnautilus.desktop inode/directory
+xdg-mime query default inode/directory    # deve stampare millnautilus.desktop
+```
+
+Se aggiorni il file .desktop dopo averlo installato, ricopialo e rilancia
+`update-desktop-database` prima di reimpostare l'associazione — una copia
+obsoleta in `~/.local/share/applications/` è la causa più comune di cartelle
+che continuano ad aprirsi con Nautilus.
+
+Nota: le estensioni per le icone del desktop (Desktop Icons NG / gtk4-ding)
+possono invocare Nautilus direttamente, ignorando l'handler predefinito. Per
+verificare se l'associazione è corretta, usa `xdg-open ~` da terminale.
+
 ## Integrazione D-Bus (FileManager1)
 
 L'app espone `org.freedesktop.FileManager1` (usata da GNOME Shell e dai browser
