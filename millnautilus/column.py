@@ -19,6 +19,7 @@ CONTEXT_MENU_XML = [
     ("Copia", "win.copy"),
     ("Taglia", "win.cut"),
     ("Incolla", "win.paste"),
+    ("Incolla come collegamento", "win.paste-link"),
     ("Copia percorso", "win.copy-path"),
     None,
     ("Rinomina…", "win.rename"),
@@ -49,6 +50,7 @@ def build_background_menu() -> Gio.Menu:
     menu = Gio.Menu()
     section1 = Gio.Menu()
     section1.append("Incolla", "win.paste")
+    section1.append("Incolla come collegamento", "win.paste-link")
     section1.append("Nuova cartella…", "win.new-folder")
     menu.append_section(None, section1)
     section2 = Gio.Menu()

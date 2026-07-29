@@ -19,11 +19,17 @@ File explorer GTK4/libadwaita con vista a colonne (Miller view), ispirato a Naut
 | Tasti | Azione |
 |---|---|
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copia / Taglia / Incolla |
+| `Ctrl+Shift+V` | Incolla come collegamento |
+| `Ctrl+A` | Seleziona tutto |
 | `F2` | Rinomina |
 | `Canc` | Sposta nel cestino |
 | `Ctrl+Shift+N` | Nuova cartella |
 | `Ctrl+H` | Mostra file nascosti |
+| `Alt+←` / `Alt+→` | Indietro / Avanti |
+| `Ctrl+L` | Modifica percorso |
+| `Alt+Invio` | Proprietà |
 | `F5` / `Ctrl+R` | Ricarica |
+| `Ctrl+N` | Apri in nuova finestra |
 | `Ctrl+Q` | Esci |
 
 ## Dipendenze

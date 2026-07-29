@@ -291,6 +291,7 @@ class MainWindow(Adw.ApplicationWindow):
             ("copy", self._on_copy, ["<Ctrl>c"]),
             ("cut", self._on_cut, ["<Ctrl>x"]),
             ("paste", self._on_paste, ["<Ctrl>v"]),
+            ("paste-link", self._on_paste_link, ["<Ctrl><Shift>v"]),
             ("rename", self._on_rename, ["F2"]),
             ("trash", self._on_trash, ["Delete"]),
             ("new-folder", self._on_new_folder, ["<Ctrl><Shift>n"]),
@@ -524,6 +525,18 @@ class MainWindow(Adw.ApplicationWindow):
         fileops.transfer(files, dest, move=cut,
                          on_done=lambda err: self._after_op(
                              err, "Spostato" if cut else "Copiato"))
+
+    def _on_paste_link(self, *_):
+        if not self._clipboard:
+            self.show_toast("Nessun elemento da incollare")
+            return
+        files, _cut = self._clipboard
+        dest = self._target_dir()
+        if dest is None:
+            return
+        fileops.make_links(
+            files, dest,
+            on_done=lambda err: self._after_op(err, "Collegamento creato"))
 
     # --- operazioni
     def _on_trash(self, *_):

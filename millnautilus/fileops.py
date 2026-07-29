@@ -98,6 +98,29 @@ def transfer(files: list[Gio.File], dest_dir: Gio.File, move: bool,
     threading.Thread(target=worker, daemon=True).start()
 
 
+def make_links(files: list[Gio.File], dest_dir: Gio.File, on_done,
+               cancellable: Gio.Cancellable | None = None):
+    """Crea collegamenti simbolici a `files` dentro `dest_dir`."""
+    def worker():
+        error = None
+        try:
+            for src in files:
+                target = src.get_path()
+                if not target:
+                    raise RuntimeError(
+                        "Collegamenti non supportati per posizioni remote")
+                name = src.get_basename() or "collegamento"
+                dest = _unique_dest(dest_dir, f"Collegamento a {name}")
+                dest.make_symbolic_link(target, cancellable)
+        except GLib.Error as err:
+            error = err.message
+        except Exception as err:  # noqa: BLE001
+            error = str(err)
+        GLib.idle_add(on_done, error)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
 def trash(files: list[Gio.File], on_done):
     """Sposta nel cestino (async, in thread per gestire più file)."""
     def worker():
