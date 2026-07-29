@@ -32,6 +32,12 @@ CSS = """
 }
 .miller-column { border-right: 1px solid alpha(currentColor, 0.12); }
 
+/* emblema dei collegamenti simbolici sulle icone */
+.link-emblem {
+  background-color: alpha(currentColor, 0.25);
+  border-radius: 9999px;
+}
+
 /* pulsantino menu (⋯) sulle righe cartella */
 .row-menu-button {
   padding: 0;

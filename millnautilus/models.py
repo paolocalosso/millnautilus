@@ -157,13 +157,12 @@ class FileItem(GObject.Object):
 
     @property
     def icon(self):
-        """Icona a colori del tema, con emblema se è un collegamento."""
-        icon = self.info.get_icon() or self.info.get_symbolic_icon()
-        if icon is not None and self.is_symlink:
-            emblem = Gio.Emblem.new(
-                Gio.ThemedIcon.new("emblem-symbolic-link"))
-            return Gio.EmblemedIcon.new(icon, emblem)
-        return icon
+        """Icona a colori del tema (come la lista file di Nautilus).
+
+        L'emblema dei collegamenti viene sovrapposto dalla vista: GTK4
+        non compone gli emblemi di GEmblemedIcon.
+        """
+        return self.info.get_icon() or self.info.get_symbolic_icon()
 
     @property
     def thumbnail_path(self):

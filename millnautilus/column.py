@@ -313,9 +313,28 @@ class MillerColumn(Gtk.Box):
             self._status_label = None
 
     # ------------------------------------------------------------ factory
+    def _link_emblem_name(self) -> str:
+        """Prima icona di emblema collegamento disponibile nel tema."""
+        if self._icon_theme is None:
+            self._icon_theme = Gtk.IconTheme.get_for_display(
+                self.get_display())
+        for name in ("emblem-symbolic-link", "emblem-link",
+                     "symbolic-link", "insert-link-symbolic",
+                     "emblem-shared-symbolic"):
+            if self._icon_theme.has_icon(name):
+                return name
+        return "emblem-symbolic-link"
+
     def _on_setup(self, factory, list_item):
         box = Gtk.Box(spacing=8, margin_top=3, margin_bottom=3)
         box.icon = Gtk.Image(pixel_size=24, valign=Gtk.Align.CENTER)
+        box.emblem = Gtk.Image(icon_name=self._link_emblem_name(),
+                               pixel_size=12, visible=False,
+                               halign=Gtk.Align.START, valign=Gtk.Align.END,
+                               css_classes=["link-emblem"])
+        icon_overlay = Gtk.Overlay(valign=Gtk.Align.CENTER)
+        icon_overlay.set_child(box.icon)
+        icon_overlay.add_overlay(box.emblem)
 
         text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
                            valign=Gtk.Align.CENTER, hexpand=True)
@@ -332,7 +351,7 @@ class MillerColumn(Gtk.Box):
                                   css_classes=["flat", "circular",
                                                "row-menu-button"])
         box.menu_btn.connect("clicked", self._on_row_menu_clicked, list_item)
-        box.append(box.icon)
+        box.append(icon_overlay)
         box.append(text_box)
         box.append(box.menu_btn)
         list_item.set_child(box)
@@ -349,6 +368,7 @@ class MillerColumn(Gtk.Box):
         item: FileItem = list_item.get_item()
         box = list_item.get_child()
         box.icon.set_from_paintable(self._lookup_icon(item))
+        box.emblem.set_visible(item.is_symlink)
         box.label.set_text(item.name)
         box.menu_btn.set_visible(item.is_dir)
         # riferimento all'elemento attualmente legato a questa riga: serve a
