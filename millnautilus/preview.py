@@ -237,6 +237,8 @@ class PreviewPanel(Gtk.Box):
             ("Proprietario", item.owner_str),
             ("Percorso", item.path_str),
         ]
+        if item.is_symlink:
+            rows.append(("Collegamento a", item.symlink_target))
         for title, value in rows:
             row = Adw.ActionRow(title=title, subtitle=value or "—",
                                 subtitle_selectable=True)

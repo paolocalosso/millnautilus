@@ -9,6 +9,7 @@ FILE_ATTRS = ",".join([
     "standard::name", "standard::display-name", "standard::type",
     "standard::size", "standard::icon", "standard::symbolic-icon",
     "standard::content-type", "standard::is-hidden", "standard::is-symlink",
+    "standard::symlink-target",
     "time::modified", "time::created",
     "unix::mode", "owner::user", "owner::group",
     "thumbnail::path", "access::can-read", "access::can-write",
@@ -147,9 +148,22 @@ class FileItem(GObject.Object):
         return dt.to_unix() if dt else 0
 
     @property
+    def is_symlink(self) -> bool:
+        return self.info.get_is_symlink()
+
+    @property
+    def symlink_target(self) -> str:
+        return self.info.get_symlink_target() or ""
+
+    @property
     def icon(self):
-        """Icona a colori del tema (come la lista file di Nautilus)."""
-        return self.info.get_icon() or self.info.get_symbolic_icon()
+        """Icona a colori del tema, con emblema se è un collegamento."""
+        icon = self.info.get_icon() or self.info.get_symbolic_icon()
+        if icon is not None and self.is_symlink:
+            emblem = Gio.Emblem.new(
+                Gio.ThemedIcon.new("emblem-symbolic-link"))
+            return Gio.EmblemedIcon.new(icon, emblem)
+        return icon
 
     @property
     def thumbnail_path(self):

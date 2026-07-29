@@ -110,7 +110,7 @@ def make_links(files: list[Gio.File], dest_dir: Gio.File, on_done,
                     raise RuntimeError(
                         "Collegamenti non supportati per posizioni remote")
                 name = src.get_basename() or "collegamento"
-                dest = _unique_dest(dest_dir, f"Collegamento a {name}")
+                dest = _unique_dest(dest_dir, name)
                 dest.make_symbolic_link(target, cancellable)
         except GLib.Error as err:
             error = err.message
