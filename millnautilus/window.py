@@ -95,6 +95,8 @@ STATE_FILE = os.path.join(GLib.get_user_config_dir(),
 # voce di cronologia per la vista "Computer"
 COMPUTER = object()
 
+BACKGROUND_SCHEMA = "org.gnome.desktop.background"
+
 
 class MainWindow(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
@@ -307,6 +309,7 @@ class MainWindow(Adw.ApplicationWindow):
             ("open-new-window", self._on_open_new_window, ["<Ctrl>n"]),
             ("copy-path", self._on_copy_path, None),
             ("properties", self._on_properties, ["<Alt>Return"]),
+            ("set-wallpaper", self._on_set_wallpaper, None),
             ("bookmark", self._on_bookmark, None),
             ("pin", self._on_pin, None),
             ("reload", lambda *_: self.miller.reload_all(), ["<Ctrl>r", "F5"]),
@@ -697,6 +700,29 @@ class MainWindow(Adw.ApplicationWindow):
                 "\n".join(i.path_str for i in items))
             self.show_toast("Percorso copiato" if len(items) == 1
                             else f"{len(items)} percorsi copiati")
+
+    def _on_set_wallpaper(self, *_):
+        item = self._target_item()
+        if item is None:
+            return
+        if not item.content_type.startswith("image/"):
+            self.show_toast("Seleziona un'immagine")
+            return
+        if item.gfile.get_path() is None:
+            self.show_toast("Solo per file locali")
+            return
+
+        source = Gio.SettingsSchemaSource.get_default()
+        if source is None or source.lookup(BACKGROUND_SCHEMA, True) is None:
+            self.show_toast("Impostazioni sfondo GNOME non disponibili")
+            return
+        settings = Gio.Settings.new(BACKGROUND_SCHEMA)
+        uri = item.gfile.get_uri()
+        settings.set_string("picture-uri", uri)
+        if "picture-uri-dark" in settings.list_keys():
+            settings.set_string("picture-uri-dark", uri)
+        Gio.Settings.sync()
+        self.show_toast(f"Sfondo impostato: {item.name}")
 
     def _on_properties(self, *_):
         self.panel_toggle.set_active(True)

@@ -25,6 +25,7 @@ CONTEXT_MENU_XML = [
     ("Rinomina…", "win.rename"),
     ("Sposta nel cestino", "win.trash"),
     None,
+    ("Imposta come sfondo", "win.set-wallpaper"),
     ("Nuova cartella…", "win.new-folder"),
     ("Aggiungi ai preferiti", "win.bookmark"),
     ("Fissa alle Posizioni", "win.pin"),
