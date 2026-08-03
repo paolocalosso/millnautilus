@@ -15,6 +15,7 @@ from .miller import MillerView  # noqa: E402
 from .models import FileItem  # noqa: E402
 from .pathbar import PathBar  # noqa: E402
 from .preview import PreviewPanel  # noqa: E402
+from .properties import PropertiesDialog  # noqa: E402
 from .sidebar import Sidebar  # noqa: E402
 
 CSS = """
@@ -725,7 +726,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.show_toast(f"Sfondo impostato: {item.name}")
 
     def _on_properties(self, *_):
-        self.panel_toggle.set_active(True)
+        items = self._target_items()
+        if not items:
+            self.show_toast("Nessun elemento selezionato")
+            return
+        PropertiesDialog(items).present(self)
 
     def _on_bookmark(self, *_):
         item = self._target_item()
