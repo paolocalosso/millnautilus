@@ -6,6 +6,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
+from . import fileops  # noqa: E402
 from .models import FileItem  # noqa: E402
 
 
@@ -69,7 +70,8 @@ class PropertiesDialog(Adw.Dialog):
             rows = [
                 ("Tipo", Gio.content_type_get_description(item.content_type)
                  or item.content_type),
-                ("Dimensione", item.size_str),
+                ("Dimensione",
+                 "Calcolo…" if item.is_dir else item.size_str),
                 ("Percorso", item.path_str),
                 ("Modificato", item.modified_str),
                 ("Creato", item.created_str),
@@ -86,48 +88,31 @@ class PropertiesDialog(Adw.Dialog):
                 ("Dimensione totale file", GLib.format_size(total)),
             ]
 
+        size_row = None
         for title, value in rows:
             row = Adw.ActionRow(title=title, subtitle=value or "—",
                                 subtitle_selectable=True)
             row.add_css_class("property")
             listbox.append(row)
+            if title == "Dimensione":
+                size_row = row
 
-        for item in (i for i in self._items if i.is_dir):
-            if len(self._items) == 1:
-                self._count_children(item, listbox)
-            break
+        if len(self._items) == 1 and self._items[0].is_dir:
+            self._measure(self._items[0], listbox, size_row)
         return listbox
 
-    def _count_children(self, item: FileItem, listbox: Gtk.ListBox):
-        row = Adw.ActionRow(title="Contenuto", subtitle="Conteggio…")
-        row.add_css_class("property")
-        listbox.append(row)
+    def _measure(self, item: FileItem, listbox: Gtk.ListBox,
+                 size_row: Adw.ActionRow | None):
+        content_row = Adw.ActionRow(title="Contenuto", subtitle="Conteggio…")
+        content_row.add_css_class("property")
+        listbox.append(content_row)
 
-        def on_enumerated(gfile, result):
-            try:
-                enumerator = gfile.enumerate_children_finish(result)
-            except GLib.Error:
-                row.set_subtitle("—")
-                return
-            count = 0
+        def on_update(total, n_files, n_dirs, finished):
+            suffix = "" if finished else " …"
+            if size_row is not None:
+                size_row.set_subtitle(GLib.format_size(total) + suffix)
+            content_row.set_subtitle(
+                f"{n_files} file, {n_dirs} cartelle" + suffix)
+            return False
 
-            def on_next(en, res):
-                nonlocal count
-                try:
-                    infos = en.next_files_finish(res)
-                except GLib.Error:
-                    return
-                if not infos:
-                    row.set_subtitle(f"{count} elementi")
-                    en.close_async(GLib.PRIORITY_DEFAULT, None, None, None)
-                    return
-                count += len(infos)
-                en.next_files_async(500, GLib.PRIORITY_LOW,
-                                    self._cancellable, on_next)
-
-            enumerator.next_files_async(500, GLib.PRIORITY_LOW,
-                                        self._cancellable, on_next)
-
-        item.gfile.enumerate_children_async(
-            "standard::name", Gio.FileQueryInfoFlags.NONE,
-            GLib.PRIORITY_LOW, self._cancellable, on_enumerated)
+        fileops.measure_directory(item.gfile, on_update, self._cancellable)

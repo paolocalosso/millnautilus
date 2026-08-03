@@ -6,6 +6,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gio, GLib, GObject, Gtk  # noqa: E402
 
+from . import fileops  # noqa: E402
 from .models import FileItem  # noqa: E402
 
 PANEL_WIDTH = 300
@@ -230,7 +231,7 @@ class PreviewPanel(Gtk.Box):
         rows = [
             ("Tipo", Gio.content_type_get_description(item.content_type)
              or item.content_type),
-            ("Dimensione", item.size_str),
+            ("Dimensione", "Calcolo…" if item.is_dir else item.size_str),
             ("Modificato", item.modified_str),
             ("Creato", item.created_str),
             ("Permessi", item.permissions_str),
@@ -239,45 +240,32 @@ class PreviewPanel(Gtk.Box):
         ]
         if item.is_symlink:
             rows.append(("Collegamento a", item.symlink_target))
+        size_row = None
         for title, value in rows:
             row = Adw.ActionRow(title=title, subtitle=value or "—",
                                 subtitle_selectable=True)
             row.add_css_class("property")
             self.info_list.append(row)
+            if title == "Dimensione":
+                size_row = row
 
         if item.is_dir:
-            self._count_children(item)
+            self._measure(item, size_row)
 
-    def _count_children(self, item: FileItem):
-        row = Adw.ActionRow(title="Contenuto", subtitle="Conteggio…")
-        row.add_css_class("property")
-        self.info_list.append(row)
+    def _measure(self, item: FileItem, size_row):
+        content_row = Adw.ActionRow(title="Contenuto", subtitle="Conteggio…")
+        content_row.add_css_class("property")
+        self.info_list.append(content_row)
+        cancellable = self._cancellable
 
-        def on_enumerated(gfile, result):
-            try:
-                enumerator = gfile.enumerate_children_finish(result)
-            except GLib.Error:
-                row.set_subtitle("—")
-                return
-            count = 0
+        def on_update(total, n_files, n_dirs, finished):
+            if cancellable.is_cancelled():
+                return False
+            suffix = "" if finished else " …"
+            if size_row is not None:
+                size_row.set_subtitle(GLib.format_size(total) + suffix)
+            content_row.set_subtitle(
+                f"{n_files} file, {n_dirs} cartelle" + suffix)
+            return False
 
-            def on_next(en, res):
-                nonlocal count
-                try:
-                    infos = en.next_files_finish(res)
-                except GLib.Error:
-                    return
-                if not infos:
-                    row.set_subtitle(f"{count} elementi")
-                    en.close_async(GLib.PRIORITY_DEFAULT, None, None, None)
-                    return
-                count += len(infos)
-                en.next_files_async(500, GLib.PRIORITY_LOW,
-                                    self._cancellable, on_next)
-
-            enumerator.next_files_async(500, GLib.PRIORITY_LOW,
-                                        self._cancellable, on_next)
-
-        item.gfile.enumerate_children_async(
-            "standard::name", Gio.FileQueryInfoFlags.NONE,
-            GLib.PRIORITY_LOW, self._cancellable, on_enumerated)
+        fileops.measure_directory(item.gfile, on_update, cancellable)

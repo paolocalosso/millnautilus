@@ -1,5 +1,6 @@
 """Operazioni su file (copia, spostamento, cestino, rinomina) via Gio."""
 import threading
+import time
 
 import gi
 
@@ -8,6 +9,56 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gio, GLib  # noqa: E402
 
 COPY_FLAGS = Gio.FileCopyFlags.NOFOLLOW_SYMLINKS
+
+
+MEASURE_ATTRS = "standard::name,standard::type,standard::size"
+
+
+def measure_directory(gfile: Gio.File, on_update,
+                      cancellable: Gio.Cancellable | None = None):
+    """Calcola ricorsivamente dimensione e conteggi in un thread.
+
+    on_update(total_bytes, n_files, n_dirs, finished) viene chiamata nel
+    main loop periodicamente e una volta al termine.
+    """
+    def worker():
+        total = n_files = n_dirs = 0
+        stack = [gfile]
+        last_emit = time.monotonic()
+        while stack:
+            if cancellable is not None and cancellable.is_cancelled():
+                return
+            current = stack.pop()
+            try:
+                enumerator = current.enumerate_children(
+                    MEASURE_ATTRS,
+                    Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, cancellable)
+            except GLib.Error:
+                continue
+            while True:
+                try:
+                    info = enumerator.next_file(cancellable)
+                except GLib.Error:
+                    break
+                if info is None:
+                    break
+                if info.get_file_type() == Gio.FileType.DIRECTORY:
+                    n_dirs += 1
+                    stack.append(current.get_child(info.get_name()))
+                else:
+                    n_files += 1
+                    total += info.get_size()
+                now = time.monotonic()
+                if now - last_emit > 0.3:
+                    last_emit = now
+                    GLib.idle_add(on_update, total, n_files, n_dirs, False)
+            try:
+                enumerator.close(cancellable)
+            except GLib.Error:
+                pass
+        GLib.idle_add(on_update, total, n_files, n_dirs, True)
+
+    threading.Thread(target=worker, daemon=True).start()
 
 
 def _unique_dest(dest_dir: Gio.File, name: str) -> Gio.File:
