@@ -164,8 +164,27 @@ class MillerColumn(Gtk.Box):
             menu_model=menu, halign=Gtk.Align.END, hexpand=True,
             tooltip_text="Ordinamento colonna",
             css_classes=["flat", "column-sort-button"])
+
+        # pulsantino menu della cartella di questa colonna
+        self.folder_btn = Gtk.Button(
+            icon_name="view-more-symbolic", halign=Gtk.Align.START,
+            tooltip_text="Menu della cartella",
+            css_classes=["flat", "column-sort-button"])
+        self.folder_btn.connect(
+            "clicked",
+            lambda b: self._popup_background_menu(b, arrow=True))
+
         header = Gtk.Box()
+        header.append(self.folder_btn)
         header.append(self.sort_btn)
+
+        # click destro sull'intestazione: stesso menu della cartella
+        gesture = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+        gesture.connect(
+            "pressed",
+            lambda g, n, x, y: self._popup_background_menu(
+                self.folder_btn, arrow=True))
+        header.add_controller(gesture)
         return header
 
     def _on_sort_by(self, action, value):
@@ -441,6 +460,13 @@ class MillerColumn(Gtk.Box):
         popover.popup()
 
     def _on_right_click(self, gesture, n_press, x, y, list_item):
+        # Ctrl+click destro: menu della cartella anche sopra un elemento
+        state = gesture.get_current_event_state()
+        if state & Gdk.ModifierType.CONTROL_MASK:
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+            self._popup_background_menu(list_item.get_child(),
+                                        x=x, y=y)
+            return
         self._popup_context_menu(list_item, list_item.get_child())
 
     def _on_row_menu_clicked(self, button, list_item):
@@ -450,18 +476,33 @@ class MillerColumn(Gtk.Box):
         picked = self.listview.pick(x, y, Gtk.PickFlags.DEFAULT)
         if picked is not self.listview:
             return  # click su una riga: gestito dal menu della riga
+        self._popup_background_menu(self.listview, x=x, y=y)
+
+    def _popup_background_menu(self, origin: Gtk.Widget, x: float = None,
+                               y: float = None, arrow: bool = False):
+        """Menu della cartella di questa colonna.
+
+        Ancorato sempre alla colonna intera: `origin` e (x, y) servono solo a
+        calcolare il punto verso cui puntare, perché widget bassi (listview
+        quasi vuota, intestazione) farebbero rimpicciolire il popover.
+        """
         win = self.get_root()
         if hasattr(win, "set_context_dir"):
             win.set_context_dir(self.directory, self)
-        # ancora il popover all'intera colonna (la listview può essere
-        # molto bassa e GTK ridurrebbe il menu aggiungendo scrollbar)
-        point = Graphene.Point()
-        point.init(x, y)
-        ok, translated = self.listview.compute_point(self, point)
-        px, py = (translated.x, translated.y) if ok else (x, y)
+
+        if x is None or y is None:
+            ok, bounds = origin.compute_bounds(self)
+            px, py = ((bounds.origin.x, bounds.origin.y + bounds.size.height)
+                      if ok else (0, 0))
+        else:
+            point = Graphene.Point()
+            point.init(x, y)
+            ok, translated = origin.compute_point(self, point)
+            px, py = (translated.x, translated.y) if ok else (x, y)
+
         popover = Gtk.PopoverMenu.new_from_model(build_background_menu())
         popover.set_parent(self)
-        popover.set_has_arrow(False)
+        popover.set_has_arrow(arrow)
         rect = Gdk.Rectangle()
         rect.x, rect.y, rect.width, rect.height = int(px), int(py), 1, 1
         popover.set_pointing_to(rect)
