@@ -100,6 +100,9 @@ BACKGROUND_SCHEMA = "org.gnome.desktop.background"
 
 
 class MainWindow(Adw.ApplicationWindow):
+    # il CSS è condiviso da tutte le finestre (provider per display)
+    _css_loaded = False
+
     def __init__(self, **kwargs):
         state = self._load_state()
         super().__init__(**kwargs, title="Millnautilus",
@@ -161,6 +164,11 @@ class MainWindow(Adw.ApplicationWindow):
 
     # ------------------------------------------------------------ UI
     def _load_css(self):
+        # il provider è per display: va installato una volta sola, non a
+        # ogni finestra
+        if MainWindow._css_loaded:
+            return
+        MainWindow._css_loaded = True
         provider = Gtk.CssProvider()
         try:
             provider.load_from_string(CSS)  # GTK >= 4.12
@@ -240,6 +248,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.panel_toggle.connect("toggled", self._on_panel_toggled)
 
         menu = Gio.Menu()
+        menu.append("Nuova finestra", "app.new-window")
         menu.append("Mostra file nascosti", "win.show-hidden")
         menu.append("Nuova cartella…", "win.new-folder")
         menu.append("Informazioni su Millnautilus", "app.about")
@@ -690,9 +699,7 @@ class MainWindow(Adw.ApplicationWindow):
                  else self._target_dir())
         if gfile is None:
             return
-        win = MainWindow(application=self.get_application())
-        win.present()
-        win.navigate_to(gfile)
+        self.get_application().new_window(gfile)
 
     def _on_copy_path(self, *_):
         items = self._target_items()

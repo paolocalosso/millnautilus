@@ -12,3 +12,9 @@ Categories=System;FileTools;FileManager;Utility;GTK;
 Keywords=files;file manager;explorer;miller;columns;
 StartupNotify=true
 StartupWMClass=org.paolo.Millnautilus
+Actions=new-window;
+
+[Desktop Action new-window]
+Name=Apri un'altra finestra
+Name[en]=Open a New Window
+Exec=python3 /home/paolo/Documents/projects/millnautilus/millnautilus.py --new-window

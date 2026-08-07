@@ -12,6 +12,7 @@ File explorer GTK4/libadwaita con vista a colonne (Miller view), ispirato a Naut
   - *Anteprima*: immagini, file di testo, thumbnail di sistema per PDF/documenti
   - *Informazioni*: tipo, dimensione, data, permessi, proprietario, percorso, numero elementi
 - **Operazioni file**: copia/taglia/incolla, rinomina, cestino, nuova cartella, apri con, drag & drop tra colonne (drop = sposta, di default)
+- **Più finestre**: nuova finestra dal menu ⋯, da `Ctrl+N` (apre la cartella selezionata) oppure con `--new-window`; il click destro sul lanciatore offre «Apri un'altra finestra»
 - File nascosti con `Ctrl+H`
 
 ## Scorciatoie
@@ -57,8 +58,14 @@ Richiede GTK ≥ 4.10 e libadwaita ≥ 1.5 (per `Adw.AlertDialog`/`AboutDialog` 
 ## Avvio
 
 ```bash
-python3 millnautilus.py
+python3 millnautilus.py                 # riusa la finestra esistente, se c'è
+python3 millnautilus.py --new-window    # forza una nuova finestra
+python3 millnautilus.py -n ~/Documenti  # nuova finestra su un percorso
 ```
+
+L'app è a singola istanza (un solo processo), ma può avere più finestre: il
+secondo avvio chiede al processo già in esecuzione di aprirne una nuova.
+Chiudendo l'ultima finestra l'applicazione esce.
 
 ## Installazione nel menu applicazioni
 
@@ -66,6 +73,11 @@ python3 millnautilus.py
 cp millnautilus.desktop ~/.local/share/applications/
 update-desktop-database ~/.local/share/applications/ 2>/dev/null || true
 ```
+
+Il file dichiara anche l'azione «Apri un'altra finestra», che compare col click
+destro sull'icona nel dock/menu applicazioni (anche ad app già aperta). Se il
+menu contestuale non la mostra, il .desktop installato è una copia obsoleta:
+ricopialo e rilancia `update-desktop-database`.
 
 Il file usa l'icona `system-file-manager` del tema in uso (la stessa famiglia di Nautilus). Se sposti il progetto, aggiorna i percorsi `Exec=` e `Path=` nel file .desktop.
 

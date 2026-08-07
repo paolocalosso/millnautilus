@@ -4,7 +4,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gio, Gtk  # noqa: E402
+from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
 from .fm1 import FileManager1  # noqa: E402
 from .window import MainWindow  # noqa: E402
@@ -15,7 +15,13 @@ APP_ID = "org.paolo.Millnautilus"
 class MillnautilusApp(Adw.Application):
     def __init__(self):
         super().__init__(application_id=APP_ID,
-                         flags=Gio.ApplicationFlags.HANDLES_OPEN)
+                         flags=Gio.ApplicationFlags.HANDLES_OPEN
+                         | Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+        self.add_main_option(
+            "new-window", ord("n"), GLib.OptionFlags.NONE,
+            GLib.OptionArg.NONE,
+            "Apri una nuova finestra invece di riusare quella esistente",
+            None)
         self._fm1 = FileManager1(self)
         self._add_actions()
 
@@ -28,6 +34,10 @@ class MillnautilusApp(Adw.Application):
         Adw.Application.do_shutdown(self)
 
     def _add_actions(self):
+        new_window = Gio.SimpleAction.new("new-window", None)
+        new_window.connect("activate", lambda *_: self.new_window())
+        self.add_action(new_window)
+
         about = Gio.SimpleAction.new("about", None)
         about.connect("activate", self._on_about)
         self.add_action(about)
@@ -36,6 +46,15 @@ class MillnautilusApp(Adw.Application):
         quit_action.connect("activate", lambda *_: self.quit())
         self.add_action(quit_action)
         self.set_accels_for_action("app.quit", ["<Ctrl>q"])
+
+    # ------------------------------------------------------------ finestre
+    def new_window(self, gfile: Gio.File | None = None) -> MainWindow:
+        """Crea e mostra una nuova finestra (opzionalmente su `gfile`)."""
+        win = MainWindow(application=self)
+        win.present()
+        if gfile is not None:
+            win.navigate_to(gfile)
+        return win
 
     def do_activate(self):
         win = self.props.active_window
@@ -48,6 +67,25 @@ class MillnautilusApp(Adw.Application):
         win = self.props.active_window
         if files and win:
             win.navigate_to(files[0])
+
+    def do_command_line(self, command_line):
+        options = command_line.get_options_dict()
+        new_window = options.contains("new-window")
+        # get_arguments() restituisce argv senza le opzioni riconosciute
+        args = command_line.get_arguments()[1:]
+        files = [command_line.create_file_for_arg(arg) for arg in args]
+
+        if files:
+            if new_window or self.props.active_window is None:
+                for gfile in files:
+                    self.new_window(gfile)
+            else:
+                self.do_open(files, len(files), "")
+        elif new_window:
+            self.new_window()
+        else:
+            self.activate()
+        return 0
 
     def _on_about(self, *_):
         dialog = Adw.AboutDialog(
