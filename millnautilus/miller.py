@@ -5,8 +5,21 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import Gio, GLib, GObject, Gtk  # noqa: E402
 
-from .column import MillerColumn  # noqa: E402
+from .column import COLUMN_WIDTH, MillerColumn  # noqa: E402
 from .models import FileItem  # noqa: E402
+
+# colonne sempre visibili, anche vuote
+MIN_COLUMNS = 3
+
+
+class PlaceholderColumn(Gtk.Box):
+    """Colonna vuota di riempimento: nessun contenuto, solo lo slot."""
+
+    def __init__(self):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self.set_size_request(COLUMN_WIDTH, -1)
+        self.add_css_class("miller-column")
+        self.add_css_class("miller-placeholder")
 
 
 class MillerView(Gtk.ScrolledWindow):
@@ -34,6 +47,7 @@ class MillerView(Gtk.ScrolledWindow):
         self.box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         self.set_child(self.box)
         self.columns: list[MillerColumn] = []
+        self._placeholders: list[PlaceholderColumn] = []
         self.root: Gio.File | None = None
         # Colonna che vogliamo tenere a fuoco (l'ultima aperta). Finché è
         # impostata, la riportiamo a destra a ogni cambio di layout.
@@ -41,9 +55,12 @@ class MillerView(Gtk.ScrolledWindow):
         # True solo mentre siamo noi a spostare lo scroll, per distinguere
         # dallo scroll manuale dell'utente.
         self._pinning = False
+        # valore di scroll impostato dall'ultimo aggancio
+        self._pin_value = 0.0
         hadj = self.get_hadjustment()
         hadj.connect("changed", self._on_hadj_changed)
         hadj.connect("value-changed", self._on_hadj_value_changed)
+        self._ensure_min_columns()
 
     # ------------------------------------------------------------ navigazione
     @property
@@ -80,6 +97,21 @@ class MillerView(Gtk.ScrolledWindow):
             if col is self._scroll_target:
                 self._scroll_target = None
             self.box.remove(col)
+        self._ensure_min_columns()
+
+    def _ensure_min_columns(self):
+        """Mantiene almeno MIN_COLUMNS slot, riempiendo con segnaposto.
+
+        I segnaposto vengono sempre ricreati in coda, così restano dopo le
+        colonne reali anche quando queste vengono aggiunte.
+        """
+        for placeholder in self._placeholders:
+            self.box.remove(placeholder)
+        self._placeholders = []
+        for _ in range(MIN_COLUMNS - len(self.columns)):
+            placeholder = PlaceholderColumn()
+            self._placeholders.append(placeholder)
+            self.box.append(placeholder)
 
     def _add_column(self, directory: Gio.File):
         col = MillerColumn(directory, depth=len(self.columns),
@@ -92,35 +124,47 @@ class MillerView(Gtk.ScrolledWindow):
                     self.emit("files-dropped", files, c.directory, move))
         self.columns.append(col)
         self.box.append(col)
+        self._ensure_min_columns()
         # Aggancio l'ultima colonna e la riporto a destra subito (idle) e a
         # ogni successivo cambio di layout: l'upper dell'aggiustamento cresce
         # in più passi mentre il contenuto si carica in modo asincrono, ma la
         # colonna è già a fuoco perché la larghezza è nota da subito. Nessun
         # timer: il "pin" viene rilasciato solo quando l'utente scorre via.
         self._scroll_target = col
-        GLib.idle_add(self._scroll_to_end)
+        GLib.idle_add(self._scroll_to_target)
 
     def _on_hadj_changed(self, _adj):
         # Il layout è cambiato (colonna aggiunta/rimossa o finestra
         # ridimensionata): se stiamo seguendo una colonna, riportala a fuoco.
         if self._scroll_target is not None:
-            self._scroll_to_end()
+            self._scroll_to_target()
 
     def _on_hadj_value_changed(self, adj):
-        # Se lo scroll non è stato impostato da noi ed è visibilmente lontano
-        # dalla fine, l'utente ha scrollato a sinistra: smetto di inseguire.
+        # Se lo scroll non è stato impostato da noi ed è lontano dal punto in
+        # cui l'avevamo agganciato, l'utente ha scrollato: smetto di inseguire.
         if self._pinning or self._scroll_target is None:
             return
-        max_value = adj.get_upper() - adj.get_page_size()
-        if adj.get_value() < max_value - 1:
+        if abs(adj.get_value() - self._pin_value) > 1:
             self._scroll_target = None
 
-    def _scroll_to_end(self):
+    def _scroll_to_target(self):
+        """Porta a fuoco l'ultima colonna reale (non i segnaposto in coda)."""
         adj = self.get_hadjustment()
+        page = adj.get_page_size()
+        value = adj.get_upper() - page
+        col = self._scroll_target
+        if col is not None and col.get_parent() is self.box:
+            ok, bounds = col.compute_bounds(self.box)
+            if ok:
+                # allinea il bordo destro della colonna a quello della vista;
+                # se la colonna è più larga della vista, mostra il suo inizio
+                value = min(bounds.origin.x,
+                            bounds.origin.x + bounds.size.width - page)
+        value = max(adj.get_lower(), min(value, adj.get_upper() - page))
         self._pinning = True
-        adj.set_value(max(adj.get_lower(),
-                          adj.get_upper() - adj.get_page_size()))
+        adj.set_value(value)
         self._pinning = False
+        self._pin_value = adj.get_value()
         return False
 
     # ------------------------------------------------------------ callbacks
