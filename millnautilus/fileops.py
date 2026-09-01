@@ -186,6 +186,22 @@ def trash(files: list[Gio.File], on_done):
     threading.Thread(target=worker, daemon=True).start()
 
 
+def delete(files: list[Gio.File], on_done):
+    """Elimina definitivamente (ricorsivo), senza passare dal cestino."""
+    def worker():
+        error = None
+        try:
+            for gfile in files:
+                _delete_recursive(gfile, None)
+        except GLib.Error as err:
+            error = err.message
+        except Exception as err:  # noqa: BLE001
+            error = str(err)
+        GLib.idle_add(on_done, error)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
 def rename(gfile: Gio.File, new_name: str, on_done):
     def callback(f, result):
         try:

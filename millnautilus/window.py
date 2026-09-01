@@ -312,6 +312,8 @@ class MainWindow(Adw.ApplicationWindow):
             ("paste-link", self._on_paste_link, ["<Ctrl><Shift>v"]),
             ("rename", self._on_rename, ["F2"]),
             ("trash", self._on_trash, ["Delete"]),
+            ("delete-permanently", self._on_delete_permanently,
+             ["<Shift>Delete"]),
             ("new-folder", self._on_new_folder, ["<Ctrl><Shift>n"]),
             ("select-all", self._on_select_all, ["<Ctrl>a"]),
             ("open-item", self._on_open_item, None),
@@ -340,6 +342,36 @@ class MainWindow(Adw.ApplicationWindow):
         show_hidden.connect("change-state", self._on_show_hidden)
         self.add_action(show_hidden)
         app.set_accels_for_action("win.show-hidden", ["<Ctrl>h"])
+
+        self._add_column_shortcuts()
+
+    def _add_column_shortcuts(self):
+        """Scorciatoie di modifica attive quando il focus è nelle colonne.
+
+        Gli acceleratori applicativi arrivano in fase "bubble", cioè dopo il
+        widget che ha il focus: Ctrl+C/X/V vengono intercettati prima da
+        listview ed etichette selezionabili. Qui li agganciamo in fase
+        "capture" sulla sola vista a colonne, così funzionano sempre lì senza
+        rubare il copia/incolla alla path bar o all'anteprima testuale.
+        """
+        controller = Gtk.ShortcutController()
+        controller.set_scope(Gtk.ShortcutScope.LOCAL)
+        controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        for accel, action_name in (
+            ("<Ctrl>c", "win.copy"),
+            ("<Ctrl>x", "win.cut"),
+            ("<Ctrl>v", "win.paste"),
+            ("<Ctrl><Shift>v", "win.paste-link"),
+            ("F2", "win.rename"),
+            ("Delete", "win.trash"),
+            ("<Shift>Delete", "win.delete-permanently"),
+        ):
+            trigger = Gtk.ShortcutTrigger.parse_string(accel)
+            if trigger is None:
+                continue
+            controller.add_shortcut(
+                Gtk.Shortcut.new(trigger, Gtk.NamedAction.new(action_name)))
+        self.miller.add_controller(controller)
 
     # ------------------------------------------------------------ helpers
     def show_toast(self, message: str):
@@ -521,15 +553,19 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_copy(self, *_):
         items = self._target_items()
-        if items:
-            self._clipboard = ([i.gfile for i in items], False)
-            self.show_toast(f"Copiato: {self._describe(items)}")
+        if not items:
+            self.show_toast("Nessun elemento selezionato")
+            return
+        self._clipboard = ([i.gfile for i in items], False)
+        self.show_toast(f"Copiato: {self._describe(items)}")
 
     def _on_cut(self, *_):
         items = self._target_items()
-        if items:
-            self._clipboard = ([i.gfile for i in items], True)
-            self.show_toast(f"Tagliato: {self._describe(items)}")
+        if not items:
+            self.show_toast("Nessun elemento selezionato")
+            return
+        self._clipboard = ([i.gfile for i in items], True)
+        self.show_toast(f"Tagliato: {self._describe(items)}")
 
     def _on_paste(self, *_):
         if not self._clipboard:
@@ -563,6 +599,32 @@ class MainWindow(Adw.ApplicationWindow):
         if items:
             fileops.trash([i.gfile for i in items],
                           lambda err: self._after_op(err, "Spostato nel cestino"))
+
+    def _on_delete_permanently(self, *_):
+        items = self._target_items()
+        if not items:
+            self.show_toast("Nessun elemento selezionato")
+            return
+        what = self._describe(items)
+        dialog = Adw.AlertDialog(
+            heading="Eliminare definitivamente?",
+            body=f"«{what}» verrà eliminato senza passare dal cestino. "
+                 "L'operazione non può essere annullata.")
+        dialog.add_response("cancel", "Annulla")
+        dialog.add_response("delete", "Elimina")
+        dialog.set_response_appearance("delete",
+                                       Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+
+        def on_response(_dlg, response):
+            if response == "delete":
+                fileops.delete(
+                    [i.gfile for i in items],
+                    lambda err: self._after_op(err, "Eliminato"))
+
+        dialog.connect("response", on_response)
+        dialog.present(self)
 
     def _on_rename(self, *_):
         items = self._target_items()

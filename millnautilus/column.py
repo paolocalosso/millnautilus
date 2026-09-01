@@ -24,6 +24,7 @@ CONTEXT_MENU_XML = [
     None,
     ("Rinomina…", "win.rename"),
     ("Sposta nel cestino", "win.trash"),
+    ("Elimina definitivamente", "win.delete-permanently"),
     None,
     ("Imposta come sfondo", "win.set-wallpaper"),
     ("Nuova cartella…", "win.new-folder"),
