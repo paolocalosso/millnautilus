@@ -83,11 +83,13 @@ class MillerColumn(Gtk.Box):
     MIN_WIDTH = 150
     MAX_WIDTH = 800
 
-    def __init__(self, directory: Gio.File, depth: int, show_hidden=False):
+    def __init__(self, directory: Gio.File, depth: int, show_hidden=False,
+                 compact=False):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL)
         self.directory = directory
         self.depth = depth
         self.show_hidden = show_hidden
+        self.compact = compact
         self._cancellable = Gio.Cancellable()
         self._all_items: list[FileItem] = []
         self._icon_theme: Gtk.IconTheme | None = None
@@ -388,10 +390,11 @@ class MillerColumn(Gtk.Box):
     def _on_bind(self, factory, list_item):
         item: FileItem = list_item.get_item()
         box = list_item.get_child()
+        self._apply_density(box)
         box.icon.set_from_paintable(self._lookup_icon(item))
         box.emblem.set_visible(item.is_symlink)
         box.label.set_text(item.name)
-        box.menu_btn.set_visible(item.is_dir)
+        box.menu_btn.set_visible(item.is_dir and not self.compact)
         # riferimento all'elemento attualmente legato a questa riga: serve a
         # scartare i conteggi asincroni che arrivano dopo il riciclo della riga
         box.item = item
@@ -406,9 +409,25 @@ class MillerColumn(Gtk.Box):
         if getattr(box, "item", None) is item:
             self._update_meta(box, item)
 
+    def _apply_density(self, box):
+        """Modalità compatta: icone piccole, niente riga dei dettagli."""
+        box.icon.set_pixel_size(16 if self.compact else 24)
+        box.set_margin_top(0 if self.compact else 3)
+        box.set_margin_bottom(0 if self.compact else 3)
+        box.set_spacing(6 if self.compact else 8)
+        box.date.set_visible(not self.compact)
+
+    def set_compact(self, compact: bool):
+        if compact == self.compact:
+            return
+        self.compact = compact
+        self._populate()  # forza il re-bind delle righe
+
     def _update_meta(self, box, item: FileItem):
         """Riga secondaria: data di modifica + peso (file) o n. oggetti
         (cartella)."""
+        if self.compact:
+            return
         extra = item.count_str if item.is_dir else item.size_str
         date = item.modified_compact
         if extra and date:

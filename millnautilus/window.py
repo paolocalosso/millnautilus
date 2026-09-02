@@ -144,6 +144,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.paned.set_position(state["sidebar_position"])
         if not state.get("panel_visible", True):
             self.panel_toggle.set_active(False)
+        if state.get("compact_view"):
+            self.compact_toggle.set_active(True)
 
     def _on_close_request(self, *_):
         width, height = self.get_default_size()
@@ -153,6 +155,7 @@ class MainWindow(Adw.ApplicationWindow):
             "maximized": self.is_maximized(),
             "sidebar_position": self.paned.get_position(),
             "panel_visible": self.panel_toggle.get_active(),
+            "compact_view": self.compact_toggle.get_active(),
         }
         try:
             os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
@@ -238,6 +241,14 @@ class MainWindow(Adw.ApplicationWindow):
                             tooltip_text="Cartella superiore")
         up_btn.connect("clicked", self._on_go_up)
         header.pack_start(up_btn)
+
+        # toggle vista compatta (icone piccole, senza riga dettagli)
+        self.compact_toggle = Gtk.ToggleButton(
+            icon_name=self._compact_icon_name(),
+            tooltip_text="Vista compatta",
+            css_classes=["circular"])
+        self.compact_toggle.connect("toggled", self._on_compact_toggled)
+        header.pack_end(self.compact_toggle)
 
         # toggle visibilità pannello destro (anteprima + dettagli)
         self.panel_toggle = Gtk.ToggleButton(
@@ -524,6 +535,19 @@ class MainWindow(Adw.ApplicationWindow):
             parent = self.miller.root.get_parent()
             if parent:
                 self.navigate_to(parent)
+
+    def _compact_icon_name(self) -> str:
+        theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+        for name in ("view-list-compact-symbolic",
+                     "view-compact-symbolic",
+                     "view-list-symbolic",
+                     "format-justify-fill-symbolic"):
+            if theme.has_icon(name):
+                return name
+        return "view-list-symbolic"
+
+    def _on_compact_toggled(self, toggle):
+        self.miller.set_compact(toggle.get_active())
 
     def _panel_icon_name(self) -> str:
         """Prima icona disponibile nel tema per 'pannello destro'."""

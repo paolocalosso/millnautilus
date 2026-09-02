@@ -44,6 +44,7 @@ class MillerView(Gtk.ScrolledWindow):
         super().__init__(vscrollbar_policy=Gtk.PolicyType.NEVER,
                          hexpand=True, vexpand=True)
         self.show_hidden = False
+        self.compact = False
         self.box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         self.set_child(self.box)
         self.columns: list[MillerColumn] = []
@@ -115,7 +116,8 @@ class MillerView(Gtk.ScrolledWindow):
 
     def _add_column(self, directory: Gio.File):
         col = MillerColumn(directory, depth=len(self.columns),
-                           show_hidden=self.show_hidden)
+                           show_hidden=self.show_hidden,
+                           compact=self.compact)
         col.connect("item-selected", self._on_item_selected)
         col.connect("multi-selected", self._on_multi_selected)
         col.connect("item-activated", self._on_item_activated)
@@ -193,6 +195,12 @@ class MillerView(Gtk.ScrolledWindow):
         self.show_hidden = show
         for col in self.columns:
             col.set_show_hidden(show)
+
+    def set_compact(self, compact: bool):
+        """Modalità compatta: icone piccole e nessuna riga di dettagli."""
+        self.compact = compact
+        for col in self.columns:
+            col.set_compact(compact)
 
     def reload_dir(self, directory: Gio.File):
         """Ricarica le colonne che mostrano `directory` (dopo operazioni)."""
