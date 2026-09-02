@@ -39,6 +39,15 @@ CSS = """
   border-radius: 9999px;
 }
 
+/* righe a bande alternate: la banda "alt" riprende lo sfondo della sidebar.
+   Il padding sta qui (non come margine) così la banda copre tutta la riga;
+   esclusa da selezione e hover, che devono restare visibili. */
+.miller-row { padding: 3px 0; }
+.miller-row.compact { padding: 0; }
+.content-pane row:not(:selected):not(:hover) > .miller-row.alt {
+  background-color: @window_bg_color;
+}
+
 /* pulsantino menu (⋯) sulle righe cartella */
 .row-menu-button {
   padding: 0;

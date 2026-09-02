@@ -349,7 +349,7 @@ class MillerColumn(Gtk.Box):
         return "emblem-symbolic-link"
 
     def _on_setup(self, factory, list_item):
-        box = Gtk.Box(spacing=8, margin_top=3, margin_bottom=3)
+        box = Gtk.Box(spacing=8, css_classes=["miller-row"])
         box.icon = Gtk.Image(pixel_size=24, valign=Gtk.Align.CENTER)
         box.emblem = Gtk.Image(icon_name=self._link_emblem_name(),
                                pixel_size=12, visible=False,
@@ -391,6 +391,12 @@ class MillerColumn(Gtk.Box):
         item: FileItem = list_item.get_item()
         box = list_item.get_child()
         self._apply_density(box)
+        # bande alternate: dipendono dalla posizione, non dall'ordine dei
+        # widget riciclati dalla listview
+        if list_item.get_position() % 2:
+            box.add_css_class("alt")
+        else:
+            box.remove_css_class("alt")
         box.icon.set_from_paintable(self._lookup_icon(item))
         box.emblem.set_visible(item.is_symlink)
         box.label.set_text(item.name)
@@ -412,10 +418,13 @@ class MillerColumn(Gtk.Box):
     def _apply_density(self, box):
         """Modalità compatta: icone piccole, niente riga dei dettagli."""
         box.icon.set_pixel_size(16 if self.compact else 24)
-        box.set_margin_top(0 if self.compact else 3)
-        box.set_margin_bottom(0 if self.compact else 3)
         box.set_spacing(6 if self.compact else 8)
         box.date.set_visible(not self.compact)
+        # il padding è nel CSS, così la banda alternata copre tutta la riga
+        if self.compact:
+            box.add_css_class("compact")
+        else:
+            box.remove_css_class("compact")
 
     def set_compact(self, compact: bool):
         if compact == self.compact:
