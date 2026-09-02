@@ -242,6 +242,15 @@ class MainWindow(Adw.ApplicationWindow):
         up_btn.connect("clicked", self._on_go_up)
         header.pack_start(up_btn)
 
+        # toggle visibilità pannello destro (anteprima + dettagli).
+        # pack_end impila da destra: il primo aggiunto resta il più a destra
+        self.panel_toggle = Gtk.ToggleButton(
+            icon_name=self._panel_icon_name(), active=True,
+            tooltip_text="Mostra/nascondi pannello laterale",
+            css_classes=["circular"])
+        header.pack_end(self.panel_toggle)
+        self.panel_toggle.connect("toggled", self._on_panel_toggled)
+
         # toggle vista compatta (icone piccole, senza riga dettagli)
         self.compact_toggle = Gtk.ToggleButton(
             icon_name=self._compact_icon_name(),
@@ -249,14 +258,6 @@ class MainWindow(Adw.ApplicationWindow):
             css_classes=["circular"])
         self.compact_toggle.connect("toggled", self._on_compact_toggled)
         header.pack_end(self.compact_toggle)
-
-        # toggle visibilità pannello destro (anteprima + dettagli)
-        self.panel_toggle = Gtk.ToggleButton(
-            icon_name=self._panel_icon_name(), active=True,
-            tooltip_text="Mostra/nascondi pannello laterale",
-            css_classes=["circular"])
-        header.pack_end(self.panel_toggle)
-        self.panel_toggle.connect("toggled", self._on_panel_toggled)
 
         menu = Gio.Menu()
         menu.append("Nuova finestra", "app.new-window")
@@ -538,10 +539,12 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _compact_icon_name(self) -> str:
         theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
-        for name in ("view-list-compact-symbolic",
-                     "view-compact-symbolic",
-                     "view-list-symbolic",
-                     "format-justify-fill-symbolic"):
+        # "view-list-compact-symbolic" esiste ma in diversi temi è disegnata
+        # fuori asse: si preferiscono icone di lista più comuni e ben centrate
+        for name in ("view-list-symbolic",
+                     "format-justify-fill-symbolic",
+                     "view-list-bullet-symbolic",
+                     "view-list-compact-symbolic"):
             if theme.has_icon(name):
                 return name
         return "view-list-symbolic"
