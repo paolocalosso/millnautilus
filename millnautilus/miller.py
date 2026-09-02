@@ -13,13 +13,46 @@ MIN_COLUMNS = 3
 
 
 class PlaceholderColumn(Gtk.Box):
-    """Colonna vuota di riempimento: nessun contenuto, solo lo slot."""
+    """Colonna vuota di riempimento: replica intestazione e bande alternate
+    delle colonne reali, così lo slot vuoto non stona accanto a quelle piene."""
 
-    def __init__(self):
+    ROWS = 80  # abbondanti: l'eccesso viene ritagliato
+
+    def __init__(self, compact: bool = False):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.set_size_request(COLUMN_WIDTH, -1)
         self.add_css_class("miller-column")
         self.add_css_class("miller-placeholder")
+        self.set_overflow(Gtk.Overflow.HIDDEN)
+
+        # intestazione fantasma: stesso ingombro di quella reale, così le
+        # bande si allineano in orizzontale con le colonne accanto
+        header = Gtk.Box()
+        ghost = Gtk.Button(icon_name="view-more-symbolic",
+                           can_focus=False, sensitive=False,
+                           css_classes=["flat", "column-sort-button"])
+        ghost.set_opacity(0)
+        header.append(ghost)
+        self.append(header)
+
+        for index in range(self.ROWS):
+            self.append(self._empty_row(index % 2 == 1, compact))
+
+    @staticmethod
+    def _empty_row(alt: bool, compact: bool) -> Gtk.Box:
+        classes = ["miller-row"]
+        if compact:
+            classes.append("compact")
+        if alt:
+            classes.append("alt")
+        row = Gtk.Box(spacing=6 if compact else 8, css_classes=classes)
+        row.append(Gtk.Image(pixel_size=16 if compact else 24))
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
+        text.append(Gtk.Label(xalign=0))
+        if not compact:
+            text.append(Gtk.Label(xalign=0, css_classes=["caption"]))
+        row.append(text)
+        return row
 
 
 class MillerView(Gtk.ScrolledWindow):
@@ -110,7 +143,7 @@ class MillerView(Gtk.ScrolledWindow):
             self.box.remove(placeholder)
         self._placeholders = []
         for _ in range(MIN_COLUMNS - len(self.columns)):
-            placeholder = PlaceholderColumn()
+            placeholder = PlaceholderColumn(self.compact)
             self._placeholders.append(placeholder)
             self.box.append(placeholder)
 
@@ -201,6 +234,7 @@ class MillerView(Gtk.ScrolledWindow):
         self.compact = compact
         for col in self.columns:
             col.set_compact(compact)
+        self._ensure_min_columns()  # ricrea i segnaposto con la nuova densità
 
     def reload_dir(self, directory: Gio.File):
         """Ricarica le colonne che mostrano `directory` (dopo operazioni)."""

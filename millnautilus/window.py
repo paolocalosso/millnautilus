@@ -40,13 +40,20 @@ CSS = """
 }
 
 /* righe a bande alternate: la banda "alt" riprende lo sfondo della sidebar.
-   Il padding sta qui (non come margine) così la banda copre tutta la riga;
-   esclusa da selezione e hover, che devono restare visibili. */
-.miller-row { padding: 3px 0; }
-.miller-row.compact { padding: 0; }
-.content-pane row:not(:selected):not(:hover) > .miller-row.alt {
+   La banda va dipinta sul nodo "row" (non sul box interno) e i margini/padding
+   del tema vanno azzerati, altrimenti resta annegata e le righe sembrano di
+   altezze diverse. Selezione e hover restano visibili. */
+.content-pane listview > row {
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+}
+.content-pane listview > row.alt:not(:selected):not(:hover),
+.miller-placeholder .miller-row.alt {
   background-color: @window_bg_color;
 }
+.miller-row { padding: 3px 6px; }
+.miller-row.compact { padding: 0px 6px; }
 
 /* pulsantino menu (⋯) sulle righe cartella */
 .row-menu-button {

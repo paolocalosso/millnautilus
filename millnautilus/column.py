@@ -391,12 +391,14 @@ class MillerColumn(Gtk.Box):
         item: FileItem = list_item.get_item()
         box = list_item.get_child()
         self._apply_density(box)
-        # bande alternate: dipendono dalla posizione, non dall'ordine dei
-        # widget riciclati dalla listview
-        if list_item.get_position() % 2:
-            box.add_css_class("alt")
-        else:
-            box.remove_css_class("alt")
+        # bande alternate: sul nodo "row" (il genitore del box), e in base alla
+        # posizione dell'elemento, non all'ordine dei widget riciclati
+        row = box.get_parent()
+        if row is not None:
+            if list_item.get_position() % 2:
+                row.add_css_class("alt")
+            else:
+                row.remove_css_class("alt")
         box.icon.set_from_paintable(self._lookup_icon(item))
         box.emblem.set_visible(item.is_symlink)
         box.label.set_text(item.name)
