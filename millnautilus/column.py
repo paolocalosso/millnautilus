@@ -6,7 +6,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import (Gdk, Gio, GLib, GObject, Graphene,  # noqa: E402
                            Gtk, Pango)
 
-from . import colwidths, sortprefs  # noqa: E402
+from . import colwidths, destinations, sortprefs  # noqa: E402
 from .models import FILE_ATTRS, FileItem, sort_items  # noqa: E402
 
 COLUMN_WIDTH = 230
@@ -41,7 +41,8 @@ EXTRACT_MENU = [
 ]
 
 
-def build_context_menu(show_extract: bool = False) -> Gio.Menu:
+def build_context_menu(show_extract: bool = False,
+                       dest_menu: Gio.Menu | None = None) -> Gio.Menu:
     menu = Gio.Menu()
     section = Gio.Menu()
     for entry in CONTEXT_MENU_XML:
@@ -51,6 +52,10 @@ def build_context_menu(show_extract: bool = False) -> Gio.Menu:
         else:
             section.append(*entry)
     menu.append_section(None, section)
+    if dest_menu is not None:
+        destinations = Gio.Menu()
+        destinations.append_submenu("Copia o sposta in", dest_menu)
+        menu.append_section(None, destinations)
     if show_extract:
         extract_section = Gio.Menu()
         for label, action in EXTRACT_MENU:
@@ -487,7 +492,7 @@ class MillerColumn(Gtk.Box):
         targets = selected if multi else [item]
         show_extract = bool(targets) and all(t.is_archive for t in targets)
         popover = Gtk.PopoverMenu.new_from_model(
-            build_context_menu(show_extract))
+            build_context_menu(show_extract, destinations.build_menu()))
         popover.set_parent(anchor)
         popover.set_has_arrow(False)
         popover.connect("closed", lambda p: GLib.idle_add(p.unparent))

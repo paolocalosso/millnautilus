@@ -352,6 +352,18 @@ class MainWindow(Adw.ApplicationWindow):
             if accels:
                 app.set_accels_for_action(f"win.{name}", accels)
 
+        # destinazioni del sottomenu "Copia o sposta in": una sola azione
+        # parametrica per operazione, con l'URI di destinazione come argomento
+        for name, move in (("copy-to", False), ("move-to", True)):
+            action = Gio.SimpleAction.new(name, GLib.VariantType("s"))
+            action.connect("activate", self._on_transfer_to, move)
+            self.add_action(action)
+        for name, move in (("copy-to-choose", False),
+                           ("move-to-choose", True)):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect("activate", self._on_transfer_choose, move)
+            self.add_action(action)
+
         show_hidden = Gio.SimpleAction.new_stateful(
             "show-hidden", None, GLib.Variant.new_boolean(False))
         show_hidden.connect("change-state", self._on_show_hidden)
@@ -800,6 +812,43 @@ class MainWindow(Adw.ApplicationWindow):
                 "\n".join(i.path_str for i in items))
             self.show_toast("Percorso copiato" if len(items) == 1
                             else f"{len(items)} percorsi copiati")
+
+    # --- copia/sposta verso una destinazione scelta dal menu
+    def _transfer_to(self, dest: Gio.File, move: bool):
+        items = self._target_items()
+        if not items:
+            self.show_toast("Nessun elemento selezionato")
+            return
+        fileops.transfer(
+            [i.gfile for i in items], dest, move=move,
+            on_done=lambda err: self._after_op(
+                err, "Spostato" if move else "Copiato"))
+
+    def _on_transfer_to(self, _action, param, move):
+        self._transfer_to(Gio.File.new_for_uri(param.get_string()), move)
+
+    def _on_transfer_choose(self, _action, _param, move):
+        items = self._target_items()
+        if not items:
+            self.show_toast("Nessun elemento selezionato")
+            return
+        dialog = Gtk.FileDialog(title="Sposta in…" if move else "Copia in…")
+        start = self.miller.current_dir
+        if start is not None:
+            dialog.set_initial_folder(start)
+
+        def on_chosen(dlg, result):
+            try:
+                folder = dlg.select_folder_finish(result)
+            except GLib.Error:
+                return  # annullato
+            if folder is not None:
+                fileops.transfer(
+                    [i.gfile for i in items], folder, move=move,
+                    on_done=lambda err: self._after_op(
+                        err, "Spostato" if move else "Copiato"))
+
+        dialog.select_folder(self, None, on_chosen)
 
     # --- estrazione archivi
     def _archive_targets(self) -> list[FileItem]:
