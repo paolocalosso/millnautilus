@@ -1,4 +1,6 @@
 """Singola colonna della Miller view."""
+import sys
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -491,8 +493,14 @@ class MillerColumn(Gtk.Box):
             win.set_context_item(None if multi else item, self)
         targets = selected if multi else [item]
         show_extract = bool(targets) and all(t.is_archive for t in targets)
+        # il sottomenu destinazioni non deve mai impedire l'apertura del menu
+        try:
+            dest_menu = destinations.build_menu()
+        except Exception as err:  # noqa: BLE001
+            print(f"Destinazioni non disponibili: {err}", file=sys.stderr)
+            dest_menu = None
         popover = Gtk.PopoverMenu.new_from_model(
-            build_context_menu(show_extract, destinations.build_menu()))
+            build_context_menu(show_extract, dest_menu))
         popover.set_parent(anchor)
         popover.set_has_arrow(False)
         popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
