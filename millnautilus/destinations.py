@@ -18,7 +18,7 @@ from .sidebar import Sidebar  # noqa: E402
 
 MAX_ENTRIES = 25    # sottocartelle elencate per livello
 MAX_DEPTH = 2       # livelli di nidificazione sotto una radice locale
-MOUNT_DEPTH = 1     # meno per i mount: FUSE e simili possono essere lenti
+MOUNT_DEPTH = 0     # nessuna esplorazione dei mount: FUSE e rete sono lenti
 TIME_BUDGET = 0.12  # secondi complessivi dedicati a esplorare le cartelle
 
 
