@@ -334,6 +334,9 @@ class MainWindow(Adw.ApplicationWindow):
             ("copy-path", self._on_copy_path, None),
             ("properties", self._on_properties, ["<Alt>Return"]),
             ("set-wallpaper", self._on_set_wallpaper, None),
+            ("extract-here", self._on_extract_here, None),
+            ("extract-folder", self._on_extract_folder, None),
+            ("extract-to", self._on_extract_to, None),
             ("bookmark", self._on_bookmark, None),
             ("pin", self._on_pin, None),
             ("reload", lambda *_: self.miller.reload_all(), ["<Ctrl>r", "F5"]),
@@ -797,6 +800,52 @@ class MainWindow(Adw.ApplicationWindow):
                 "\n".join(i.path_str for i in items))
             self.show_toast("Percorso copiato" if len(items) == 1
                             else f"{len(items)} percorsi copiati")
+
+    # --- estrazione archivi
+    def _archive_targets(self) -> list[FileItem]:
+        items = [i for i in self._target_items() if i.is_archive]
+        if not items:
+            self.show_toast("Nessun archivio selezionato")
+        return items
+
+    def _extract(self, items: list[FileItem], dest: Gio.File,
+                 into_subdir: bool):
+        self.show_toast("Estrazione in corso…")
+        fileops.extract([i.gfile for i in items], dest, into_subdir,
+                        lambda err: self._after_op(err, "Estrazione completata"))
+
+    def _on_extract_here(self, *_):
+        items = self._archive_targets()
+        if items:
+            dest = items[0].gfile.get_parent()
+            if dest is not None:
+                self._extract(items, dest, into_subdir=False)
+
+    def _on_extract_folder(self, *_):
+        items = self._archive_targets()
+        if items:
+            dest = items[0].gfile.get_parent()
+            if dest is not None:
+                self._extract(items, dest, into_subdir=True)
+
+    def _on_extract_to(self, *_):
+        items = self._archive_targets()
+        if not items:
+            return
+        dialog = Gtk.FileDialog(title="Estrai in…")
+        parent = items[0].gfile.get_parent()
+        if parent is not None:
+            dialog.set_initial_folder(parent)
+
+        def on_chosen(dlg, result):
+            try:
+                folder = dlg.select_folder_finish(result)
+            except GLib.Error:
+                return  # annullato
+            if folder is not None:
+                self._extract(items, folder, into_subdir=False)
+
+        dialog.select_folder(self, None, on_chosen)
 
     def _on_set_wallpaper(self, *_):
         item = self._target_item()

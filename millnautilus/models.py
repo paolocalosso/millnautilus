@@ -16,6 +16,25 @@ FILE_ATTRS = ",".join([
 ])
 
 
+ARCHIVE_TYPES = frozenset((
+    "application/zip", "application/x-zip-compressed",
+    "application/x-tar", "application/x-compressed-tar",
+    "application/x-bzip-compressed-tar", "application/x-xz-compressed-tar",
+    "application/x-zstd-compressed-tar", "application/x-lzma-compressed-tar",
+    "application/gzip", "application/x-gzip", "application/x-bzip",
+    "application/x-bzip2", "application/x-xz", "application/zstd",
+    "application/x-7z-compressed", "application/vnd.rar",
+    "application/x-rar", "application/x-rar-compressed",
+    "application/x-lzma", "application/x-lzip", "application/x-cpio",
+    "application/vnd.debian.binary-package", "application/x-iso9660-image",
+))
+
+ARCHIVE_SUFFIXES = (
+    ".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz",
+    ".txz", ".tar.zst", ".7z", ".rar", ".gz", ".bz2", ".xz", ".zst",
+)
+
+
 class FileItem(GObject.Object):
     """Wrapper GObject attorno a Gio.File + Gio.FileInfo."""
 
@@ -44,6 +63,15 @@ class FileItem(GObject.Object):
     @property
     def content_type(self) -> str:
         return self.info.get_content_type() or "application/octet-stream"
+
+    @property
+    def is_archive(self) -> bool:
+        """Archivio estraibile (per le voci "Estrai" del menu contestuale)."""
+        if self.is_dir:
+            return False
+        if self.content_type in ARCHIVE_TYPES:
+            return True
+        return self.name.lower().endswith(ARCHIVE_SUFFIXES)
 
     @property
     def size(self) -> int:

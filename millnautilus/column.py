@@ -34,7 +34,14 @@ CONTEXT_MENU_XML = [
 ]
 
 
-def build_context_menu() -> Gio.Menu:
+EXTRACT_MENU = [
+    ("Estrai qui", "win.extract-here"),
+    ("Estrai qui in cartella", "win.extract-folder"),
+    ("Estrai in…", "win.extract-to"),
+]
+
+
+def build_context_menu(show_extract: bool = False) -> Gio.Menu:
     menu = Gio.Menu()
     section = Gio.Menu()
     for entry in CONTEXT_MENU_XML:
@@ -44,6 +51,11 @@ def build_context_menu() -> Gio.Menu:
         else:
             section.append(*entry)
     menu.append_section(None, section)
+    if show_extract:
+        extract_section = Gio.Menu()
+        for label, action in EXTRACT_MENU:
+            extract_section.append(label, action)
+        menu.append_section(None, extract_section)
     return menu
 
 
@@ -465,15 +477,17 @@ class MillerColumn(Gtk.Box):
         if not self.selection.is_selected(position):
             self.selection.select_item(position, True)
         win = self.get_root()
+        selected = self.get_selected_items()
+        item = list_item.get_item()
+        multi = item in selected and len(selected) > 1
         if hasattr(win, "set_context_item"):
-            selected = self.get_selected_items()
-            if list_item.get_item() in selected and len(selected) > 1:
-                # click destro su selezione multipla: le azioni agiscono
-                # su tutti gli elementi selezionati
-                win.set_context_item(None, self)
-            else:
-                win.set_context_item(list_item.get_item(), self)
-        popover = Gtk.PopoverMenu.new_from_model(build_context_menu())
+            # click destro su selezione multipla: le azioni agiscono su tutti
+            # gli elementi selezionati
+            win.set_context_item(None if multi else item, self)
+        targets = selected if multi else [item]
+        show_extract = bool(targets) and all(t.is_archive for t in targets)
+        popover = Gtk.PopoverMenu.new_from_model(
+            build_context_menu(show_extract))
         popover.set_parent(anchor)
         popover.set_has_arrow(False)
         popover.connect("closed", lambda p: GLib.idle_add(p.unparent))

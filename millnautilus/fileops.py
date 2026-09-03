@@ -1,4 +1,7 @@
 """Operazioni su file (copia, spostamento, cestino, rinomina) via Gio."""
+import os
+import shutil
+import subprocess
 import threading
 import time
 
@@ -193,6 +196,83 @@ def delete(files: list[Gio.File], on_done):
         try:
             for gfile in files:
                 _delete_recursive(gfile, None)
+        except GLib.Error as err:
+            error = err.message
+        except Exception as err:  # noqa: BLE001
+            error = str(err)
+        GLib.idle_add(on_done, error)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+# estensioni composte da togliere per ricavare il nome della cartella
+COMPOUND_SUFFIXES = (".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst",
+                     ".tar.lzma", ".tgz", ".tbz2", ".txz")
+
+# strumenti esterni per i formati che shutil non gestisce (7z, rar, …)
+EXTRACT_TOOLS = (
+    ("7z", lambda src, dst: ["7z", "x", "-y", f"-o{dst}", src]),
+    ("7za", lambda src, dst: ["7za", "x", "-y", f"-o{dst}", src]),
+    ("unar", lambda src, dst: ["unar", "-f", "-o", dst, src]),
+    ("bsdtar", lambda src, dst: ["bsdtar", "-x", "-f", src, "-C", dst]),
+)
+
+
+def archive_basename(path: str) -> str:
+    """Nome dell'archivio senza estensione (gestisce .tar.gz e simili)."""
+    name = os.path.basename(path)
+    lower = name.lower()
+    for suffix in COMPOUND_SUFFIXES:
+        if lower.endswith(suffix):
+            return name[:-len(suffix)]
+    stem = os.path.splitext(name)[0]
+    return stem or name
+
+
+def _extract_one(src_path: str, dest_path: str):
+    try:
+        shutil.unpack_archive(src_path, dest_path)
+        return
+    except (shutil.ReadError, ValueError):
+        pass  # formato non gestito da shutil: prova gli strumenti esterni
+    for tool, build_argv in EXTRACT_TOOLS:
+        if not shutil.which(tool):
+            continue
+        result = subprocess.run(build_argv(src_path, dest_path),
+                                capture_output=True)
+        if result.returncode == 0:
+            return
+        message = result.stderr.decode(errors="replace").strip()
+        raise RuntimeError(message or f"{tool}: errore {result.returncode}")
+    raise RuntimeError("Formato non supportato: installa p7zip o unar")
+
+
+def extract(files: list[Gio.File], dest_dir: Gio.File, into_subdir: bool,
+            on_done):
+    """Estrae archivi in `dest_dir`.
+
+    Con `into_subdir` ogni archivio finisce in una cartella che porta il suo
+    stesso nome, altrimenti il contenuto viene estratto direttamente.
+    """
+    def worker():
+        error = None
+        try:
+            base_path = dest_dir.get_path()
+            if not base_path:
+                raise RuntimeError(
+                    "Estrazione non supportata su posizioni remote")
+            for src in files:
+                src_path = src.get_path()
+                if not src_path:
+                    raise RuntimeError(
+                        "Estrazione non supportata su posizioni remote")
+                target = base_path
+                if into_subdir:
+                    folder = _unique_dest(dest_dir,
+                                          archive_basename(src_path))
+                    folder.make_directory_with_parents(None)
+                    target = folder.get_path()
+                _extract_one(src_path, target)
         except GLib.Error as err:
             error = err.message
         except Exception as err:  # noqa: BLE001
