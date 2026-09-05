@@ -208,6 +208,18 @@ class MillerView(Gtk.ScrolledWindow):
             if col.directory.equal(directory):
                 col.reload()
 
+    def set_filter(self, text: str, recursive: bool = False):
+        """Filtra la colonna corrente (l'ultima aperta a destra)."""
+        if self.columns:
+            self.columns[-1].set_filter(text, recursive)
+
+    def filter_target_name(self) -> str:
+        """Nome della cartella su cui agisce la ricerca."""
+        if not self.columns:
+            return ""
+        directory = self.columns[-1].directory
+        return directory.get_basename() or directory.get_uri()
+
     def reload_all(self):
         for col in self.columns:
             col.reload()

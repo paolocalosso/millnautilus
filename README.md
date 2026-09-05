@@ -28,6 +28,7 @@ File explorer GTK4/libadwaita con vista a colonne (Miller view), ispirato a Naut
 | `Ctrl+H` | Mostra file nascosti |
 | `Alt+←` / `Alt+→` | Indietro / Avanti |
 | `Ctrl+L` | Modifica percorso |
+| `Ctrl+F` | Cerca nella colonna corrente |
 | `Alt+Invio` | Proprietà |
 | `F5` / `Ctrl+R` | Ricarica |
 | `Ctrl+N` | Apri in nuova finestra |

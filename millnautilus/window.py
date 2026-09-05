@@ -251,6 +251,11 @@ class MainWindow(Adw.ApplicationWindow):
         header.pack_end(self.panel_toggle)
         self.panel_toggle.connect("toggled", self._on_panel_toggled)
 
+        self.search_btn = Gtk.ToggleButton(
+            icon_name="system-search-symbolic",
+            tooltip_text="Cerca (Ctrl+F)", css_classes=["circular"])
+        header.pack_end(self.search_btn)
+
         # toggle vista compatta (icone piccole, senza riga dettagli)
         self.compact_toggle = Gtk.ToggleButton(
             icon_name=self._compact_icon_name(),
@@ -269,6 +274,7 @@ class MainWindow(Adw.ApplicationWindow):
         header.pack_end(menu_btn)
 
         toolbar.add_top_bar(header)
+        toolbar.add_top_bar(self._build_search_bar())
 
         self.miller = MillerView()
         self.miller.connect("selection-changed", self._on_selection_changed)
@@ -342,6 +348,8 @@ class MainWindow(Adw.ApplicationWindow):
             ("reload", lambda *_: self.miller.reload_all(), ["<Ctrl>r", "F5"]),
             ("edit-location", lambda *_: self.pathbar.start_edit(),
              ["<Ctrl>l"]),
+            ("search", lambda *_: self.search_btn.set_active(
+                not self.search_btn.get_active()), ["<Ctrl>f"]),
             ("back", self._on_back, ["<Alt>Left"]),
             ("forward", self._on_forward, ["<Alt>Right"]),
         ]
@@ -566,6 +574,51 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_compact_toggled(self, toggle):
         self.miller.set_compact(toggle.get_active())
+
+    # ------------------------------------------------------------ ricerca
+    def _build_search_bar(self) -> Gtk.SearchBar:
+        self.search_entry = Gtk.SearchEntry(hexpand=True,
+                                            placeholder_text="Cerca…")
+        self.search_entry.connect("search-changed",
+                                  lambda *_: self._apply_search())
+        self.search_entry.connect("stop-search",
+                                  lambda *_: self.search_btn.set_active(False))
+
+        self.recursive_btn = Gtk.ToggleButton(
+            label="Sottocartelle",
+            tooltip_text="Estendi la ricerca alle sottocartelle")
+        self.recursive_btn.connect("toggled", lambda *_: self._apply_search())
+
+        box = Gtk.Box(spacing=6, hexpand=True)
+        box.append(self.search_entry)
+        box.append(self.recursive_btn)
+
+        self.search_bar = Gtk.SearchBar()
+        self.search_bar.set_child(box)
+        self.search_bar.connect_entry(self.search_entry)
+        self.search_bar.set_key_capture_widget(self)
+        self.search_btn.bind_property(
+            "active", self.search_bar, "search-mode-enabled",
+            GObject.BindingFlags.BIDIRECTIONAL
+            | GObject.BindingFlags.SYNC_CREATE)
+        self.search_bar.connect("notify::search-mode-enabled",
+                                self._on_search_mode)
+        return self.search_bar
+
+    def _on_search_mode(self, bar, _pspec):
+        if bar.get_search_mode():
+            self.view_stack.set_visible_child_name("miller")
+            self.search_entry.set_placeholder_text(
+                f"Cerca in {self.miller.filter_target_name()}…")
+        else:
+            self.search_entry.set_text("")
+            self.miller.set_filter("", False)
+
+    def _apply_search(self):
+        if not self.search_bar.get_search_mode():
+            return
+        self.miller.set_filter(self.search_entry.get_text(),
+                               self.recursive_btn.get_active())
 
     def _panel_icon_name(self) -> str:
         """Prima icona disponibile nel tema per 'pannello destro'."""

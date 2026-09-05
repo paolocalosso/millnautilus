@@ -1,5 +1,6 @@
 """Singola colonna della Miller view."""
 import sys
+import threading
 
 import gi
 
@@ -115,6 +116,9 @@ class MillerColumn(Gtk.Box):
         self._pending_select: Gio.File | None = None
         self._status_label: Gtk.Label | None = None
         self._mount_attempted = False
+        self._filter_text = ""
+        self._recursive = False
+        self._search_cancellable: Gio.Cancellable | None = None
         self._sort_by, self._sort_desc = sortprefs.get_sort(
             directory.get_uri())
 
@@ -316,8 +320,13 @@ class MillerColumn(Gtk.Box):
                                     self._cancellable, self._on_next_files)
 
     def _populate(self):
+        if self._recursive and self._filter_text:
+            return  # i risultati arrivano dalla ricerca ricorsiva
         items = [i for i in self._all_items
                  if self.show_hidden or not i.is_hidden]
+        if self._filter_text:
+            items = [i for i in items
+                     if self._filter_text in i.name.casefold()]
         items = sort_items(items, self._sort_by, self._sort_desc)
         self.store.remove_all()
         self.store.splice(0, 0, items)
@@ -333,6 +342,84 @@ class MillerColumn(Gtk.Box):
     def select_file(self, gfile: Gio.File):
         """Seleziona `gfile` appena il contenuto è caricato."""
         self._pending_select = gfile
+
+    # ------------------------------------------------------------ ricerca
+    def set_filter(self, text: str, recursive: bool = False):
+        """Filtra la colonna; se `recursive`, cerca anche nelle sottocartelle."""
+        self._cancel_search()
+        self._filter_text = text.strip().casefold()
+        self._recursive = recursive
+        self._clear_status()
+        if self._filter_text and recursive:
+            self._start_recursive_search()
+        else:
+            self._populate()
+            if self._filter_text and self.store.get_n_items() == 0:
+                self._show_status("Nessun risultato")
+
+    def _cancel_search(self):
+        if self._search_cancellable is not None:
+            self._search_cancellable.cancel()
+            self._search_cancellable = None
+
+    def _start_recursive_search(self):
+        self._search_cancellable = Gio.Cancellable()
+        cancellable = self._search_cancellable
+        needle = self._filter_text
+        root = self.directory
+        show_hidden = self.show_hidden
+        self.store.remove_all()
+        self._show_status("Ricerca in corso…")
+
+        def worker():
+            stack = [root]
+            batch = []
+            while stack:
+                if cancellable.is_cancelled():
+                    return
+                current = stack.pop()
+                try:
+                    enumerator = current.enumerate_children(
+                        FILE_ATTRS, Gio.FileQueryInfoFlags.NONE, cancellable)
+                except GLib.Error:
+                    continue
+                while True:
+                    try:
+                        info = enumerator.next_file(cancellable)
+                    except GLib.Error:
+                        break
+                    if info is None:
+                        break
+                    if info.get_is_hidden() and not show_hidden:
+                        continue
+                    child = current.get_child(info.get_name())
+                    if info.get_file_type() == Gio.FileType.DIRECTORY:
+                        stack.append(child)
+                    name = info.get_display_name() or info.get_name()
+                    if needle in name.casefold():
+                        batch.append(FileItem(child, info))
+                        if len(batch) >= 20:
+                            GLib.idle_add(self._append_results, batch,
+                                          cancellable, False)
+                            batch = []
+                try:
+                    enumerator.close(cancellable)
+                except GLib.Error:
+                    pass
+            GLib.idle_add(self._append_results, batch, cancellable, True)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _append_results(self, items, cancellable, finished):
+        if cancellable.is_cancelled():
+            return False
+        if items:
+            self.store.splice(self.store.get_n_items(), 0, items)
+        if finished:
+            self._clear_status()
+            if self.store.get_n_items() == 0:
+                self._show_status("Nessun risultato")
+        return False
 
     def set_show_hidden(self, show: bool):
         self.show_hidden = show
