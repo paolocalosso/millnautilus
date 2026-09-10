@@ -1,6 +1,7 @@
 """Finestra principale."""
 import json
 import os
+import sys
 
 import gi
 
@@ -98,10 +99,15 @@ COMPUTER = object()
 
 BACKGROUND_SCHEMA = "org.gnome.desktop.background"
 
+# formato appunti di GNOME: "copy"/"cut" seguito dagli URI, uno per riga
+GNOME_COPIED_FILES = "x-special/gnome-copied-files"
+
 
 class MainWindow(Adw.ApplicationWindow):
     # il CSS è condiviso da tutte le finestre (provider per display)
     _css_loaded = False
+    # riserva agli appunti di sistema: (list[Gio.File], cut), condivisa
+    _clipboard: tuple[list[Gio.File], bool] | None = None
 
     def __init__(self, **kwargs):
         state = self._load_state()
@@ -110,8 +116,8 @@ class MainWindow(Adw.ApplicationWindow):
                          default_height=state.get("height", 720))
         self._load_css()
 
-        # clipboard interna: (list[Gio.File], cut)
-        self._clipboard: tuple[list[Gio.File], bool] | None = None
+        # gli appunti stanno negli attributi di classe: sono condivisi da
+        # tutte le finestre (vedi anche _set_clipboard / _read_clipboard)
         # elemento su cui è stato aperto il menu contestuale
         self._context_item: FileItem | None = None
         self._context_column = None
@@ -646,12 +652,34 @@ class MainWindow(Adw.ApplicationWindow):
         return (items[0].name if len(items) == 1
                 else f"{len(items)} elementi")
 
+    def _set_clipboard(self, items: list[FileItem], cut: bool):
+        """Scrive negli appunti di sistema nel formato usato da GNOME.
+
+        Serve a far funzionare copia/incolla tra finestre diverse (e con
+        Nautilus): tenere la lista solo in memoria la legherebbe a una sola
+        finestra. La copia interna resta come riserva.
+        """
+        uris = [i.gfile.get_uri() for i in items]
+        MainWindow._clipboard = ([i.gfile for i in items], cut)
+        payload = ("cut\n" if cut else "copy\n") + "\n".join(uris)
+        try:
+            special = Gdk.ContentProvider.new_for_bytes(
+                GNOME_COPIED_FILES, GLib.Bytes.new(payload.encode()))
+            uri_list = Gdk.ContentProvider.new_for_bytes(
+                "text/uri-list", GLib.Bytes.new(("\n".join(uris) + "\n")
+                                                .encode()))
+            provider = Gdk.ContentProvider.new_union([special, uri_list])
+            self.get_clipboard().set_content(provider)
+        except Exception as err:  # noqa: BLE001
+            print(f"Appunti di sistema non disponibili: {err}",
+                  file=sys.stderr)
+
     def _on_copy(self, *_):
         items = self._target_items()
         if not items:
             self.show_toast("Nessun elemento selezionato")
             return
-        self._clipboard = ([i.gfile for i in items], False)
+        self._set_clipboard(items, cut=False)
         self.show_toast(f"Copiato: {self._describe(items)}")
 
     def _on_cut(self, *_):
@@ -659,34 +687,81 @@ class MainWindow(Adw.ApplicationWindow):
         if not items:
             self.show_toast("Nessun elemento selezionato")
             return
-        self._clipboard = ([i.gfile for i in items], True)
+        self._set_clipboard(items, cut=True)
         self.show_toast(f"Tagliato: {self._describe(items)}")
 
-    def _on_paste(self, *_):
-        if not self._clipboard:
-            self.show_toast("Nessun elemento da incollare")
+    # --- lettura appunti
+    def _read_clipboard(self, on_ready):
+        """Legge (files, cut) dagli appunti di sistema, con riserva interna.
+
+        on_ready(files, cut) viene sempre chiamata; files è vuoto se non c'è
+        nulla di incollabile.
+        """
+        clipboard = self.get_clipboard()
+        if not clipboard.get_formats().contain_mime_type(GNOME_COPIED_FILES):
+            files, cut = MainWindow._clipboard or ([], False)
+            on_ready(list(files), cut)
             return
-        files, cut = self._clipboard
+
+        def on_stream(cb, result):
+            try:
+                stream, _mime = cb.read_finish(result)
+            except GLib.Error:
+                files, cut = MainWindow._clipboard or ([], False)
+                on_ready(list(files), cut)
+                return
+            stream.read_bytes_async(64 * 1024, GLib.PRIORITY_DEFAULT,
+                                    None, on_bytes)
+
+        def on_bytes(stream, result):
+            try:
+                raw = stream.read_bytes_finish(result).get_data()
+            except GLib.Error:
+                files, cut = MainWindow._clipboard or ([], False)
+                on_ready(list(files), cut)
+                return
+            lines = [line for line in raw.decode(errors="replace").splitlines()
+                     if line.strip()]
+            if len(lines) < 2:
+                on_ready([], False)
+                return
+            cut = lines[0].strip() == "cut"
+            on_ready([Gio.File.new_for_uri(u) for u in lines[1:]], cut)
+
+        clipboard.read_async([GNOME_COPIED_FILES], GLib.PRIORITY_DEFAULT,
+                             None, on_stream)
+
+    def _on_paste(self, *_):
         dest = self._target_dir()
         if dest is None:
             return
-        if cut:
-            self._clipboard = None
-        fileops.transfer(files, dest, move=cut,
-                         on_done=lambda err: self._after_op(
-                             err, "Spostato" if cut else "Copiato"))
+
+        def paste(files, cut):
+            if not files:
+                self.show_toast("Nessun elemento da incollare")
+                return
+            if cut:
+                MainWindow._clipboard = None
+            fileops.transfer(files, dest, move=cut,
+                             on_done=lambda err: self._after_op(
+                                 err, "Spostato" if cut else "Copiato"))
+
+        self._read_clipboard(paste)
 
     def _on_paste_link(self, *_):
-        if not self._clipboard:
-            self.show_toast("Nessun elemento da incollare")
-            return
-        files, _cut = self._clipboard
         dest = self._target_dir()
         if dest is None:
             return
-        fileops.make_links(
-            files, dest,
-            on_done=lambda err: self._after_op(err, "Collegamento creato"))
+
+        def link(files, _cut):
+            if not files:
+                self.show_toast("Nessun elemento da incollare")
+                return
+            fileops.make_links(
+                files, dest,
+                on_done=lambda err: self._after_op(err, "Collegamento creato"))
+
+        self._read_clipboard(link)
 
     # --- operazioni
     def _on_trash(self, *_):
