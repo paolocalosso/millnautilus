@@ -102,34 +102,53 @@ BACKGROUND_SCHEMA = "org.gnome.desktop.background"
 # formato appunti di GNOME: "copy"/"cut" seguito dagli URI, uno per riga
 GNOME_COPIED_FILES = "x-special/gnome-copied-files"
 
-# Anteprima rapida: interfaccia D-Bus implementata da GNOME Sushi. Esistono
-# varianti diverse — le build di sviluppo (flatpak nightly) usano il nome con
-# suffisso "Devel", e l'interfaccia "NautilusPreviewer2" ha perso il parametro
-# xid, che serviva solo su X11 — quindi si tenta finché una risponde.
+# Anteprima rapida (GNOME Sushi). Nome bus, percorso, interfaccia e persino la
+# firma di ShowFile cambiano tra versioni — le build di sviluppo aggiungono il
+# suffisso "Devel", e "NautilusPreviewer2" ha una firma diversa — quindi il
+# servizio viene interrogato invece di tirare a indovinare.
 PREVIEWER_SERVICES = (
     ("org.gnome.NautilusPreviewer", "/org/gnome/NautilusPreviewer"),
     ("org.gnome.NautilusPreviewerDevel", "/org/gnome/NautilusPreviewerDevel"),
 )
-PREVIEWER_IFACES = (
-    ("org.gnome.NautilusPreviewer2", "(sb)"),
-    ("org.gnome.NautilusPreviewer2", "(sib)"),
-    ("org.gnome.NautilusPreviewer", "(sib)"),
-    ("org.gnome.NautilusPreviewer", "(sb)"),
-)
+PREVIEWER_IFACE_PREFIX = "org.gnome.NautilusPreviewer"
 
 
-def _previewer_candidates() -> list[tuple[str, str, str, str]]:
-    """(nome bus, percorso, interfaccia, firma) da tentare in ordine."""
-    return [(name, path, iface, signature)
-            for name, path in PREVIEWER_SERVICES
-            for iface, signature in PREVIEWER_IFACES]
+def _find_show_file(xml: str) -> tuple[str, str] | None:
+    """(interfaccia, firma) del metodo ShowFile trovato nell'introspezione."""
+    try:
+        node = Gio.DBusNodeInfo.new_for_xml(xml)
+    except GLib.Error:
+        return None
+    for iface in node.interfaces:
+        if not iface.name.startswith(PREVIEWER_IFACE_PREFIX):
+            continue
+        for method in iface.methods:
+            if method.name == "ShowFile":
+                signature = "".join(arg.signature for arg in method.in_args)
+                return iface.name, signature
+    return None
 
 
-def _previewer_args(uri: str, signature: str) -> GLib.Variant:
-    """ShowFile(uri, [xid,] close_if_already_shown)."""
-    if signature == "(sb)":
-        return GLib.Variant(signature, (uri, True))
-    return GLib.Variant(signature, (uri, 0, True))
+def _previewer_args(uri: str, signature: str) -> GLib.Variant | None:
+    """Costruisce gli argomenti di ShowFile a partire dalla sua firma.
+
+    Le versioni dell'API differiscono: la prima stringa è sempre l'URI, un
+    intero è il vecchio xid di X11 (0), una seconda stringa è l'handle di
+    finestra Wayland (vuoto), il booleano è close_if_already_shown.
+    """
+    values = []
+    uri_used = False
+    for char in signature:
+        if char == "s":
+            values.append(uri if not uri_used else "")
+            uri_used = True
+        elif char in "iux":
+            values.append(0)
+        elif char == "b":
+            values.append(True)
+        else:
+            return None  # firma inattesa: meglio non tirare a indovinare
+    return GLib.Variant(f"({signature})", tuple(values))
 
 
 class MainWindow(Adw.ApplicationWindow):
@@ -986,39 +1005,57 @@ class MainWindow(Adw.ApplicationWindow):
         except GLib.Error as err:
             self.show_toast(f"Bus di sessione non disponibile: {err.message}")
             return
-        candidates = ([MainWindow._previewer] if MainWindow._previewer
-                      else _previewer_candidates())
-        self._try_preview(bus, item.uri, candidates, 0)
+        if MainWindow._previewer:
+            self._call_preview(bus, item.uri, MainWindow._previewer)
+        else:
+            self._discover_previewer(bus, item.uri, 0)
 
-    # errori che significano "questa combinazione non esiste": si prosegue
-    RETRY_ERRORS = (Gio.DBusError.SERVICE_UNKNOWN,
-                    Gio.DBusError.UNKNOWN_OBJECT,
-                    Gio.DBusError.UNKNOWN_METHOD,
-                    Gio.DBusError.UNKNOWN_INTERFACE,
-                    Gio.DBusError.INVALID_ARGS)
-
-    def _try_preview(self, bus, uri: str, candidates, index: int):
-        if index >= len(candidates):
-            MainWindow._previewer = None
+    def _discover_previewer(self, bus, uri: str, index: int):
+        """Interroga i servizi noti per scoprire interfaccia e firma reali."""
+        if index >= len(PREVIEWER_SERVICES):
             self.show_toast(
                 "Anteprima rapida non disponibile: installa GNOME Sushi")
             return
-        name, path, iface, signature = candidates[index]
+        name, path = PREVIEWER_SERVICES[index]
+
+        def on_introspected(connection, result):
+            try:
+                reply = connection.call_finish(result)
+            except GLib.Error:
+                self._discover_previewer(bus, uri, index + 1)
+                return
+            found = _find_show_file(reply.unpack()[0])
+            if found is None:
+                self._discover_previewer(bus, uri, index + 1)
+                return
+            iface, signature = found
+            target = (name, path, iface, signature)
+            MainWindow._previewer = target
+            print(f"Anteprima rapida: {name} {path} {iface}({signature})",
+                  file=sys.stderr)
+            self._call_preview(bus, uri, target)
+
+        bus.call(name, path, "org.freedesktop.DBus.Introspectable",
+                 "Introspect", None, GLib.VariantType("(s)"),
+                 Gio.DBusCallFlags.NONE, -1, None, on_introspected)
+
+    def _call_preview(self, bus, uri: str, target):
+        name, path, iface, signature = target
+        args = _previewer_args(uri, signature)
+        if args is None:
+            self.show_toast(
+                f"Anteprima rapida: firma non riconosciuta ({signature})")
+            return
 
         def on_called(connection, result):
             try:
                 connection.call_finish(result)
-                MainWindow._previewer = candidates[index]  # ricorda l'esito
             except GLib.Error as err:
-                if any(err.matches(Gio.dbus_error_quark(), code)
-                       for code in self.RETRY_ERRORS):
-                    self._try_preview(bus, uri, candidates, index + 1)
-                else:
-                    self.show_toast(f"Anteprima non riuscita: {err.message}")
+                MainWindow._previewer = None  # riprova il rilevamento
+                self.show_toast(f"Anteprima non riuscita: {err.message}")
 
         # con close_if_already_shown lo Spazio richiude l'anteprima già aperta
-        bus.call(name, path, iface, "ShowFile",
-                 _previewer_args(uri, signature),
+        bus.call(name, path, iface, "ShowFile", args,
                  None, Gio.DBusCallFlags.NONE, -1, None, on_called)
 
     # --- copia/sposta verso una destinazione scelta dal menu
