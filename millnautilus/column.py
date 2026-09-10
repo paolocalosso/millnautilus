@@ -15,6 +15,7 @@ from .models import FILE_ATTRS, FileItem, sort_items  # noqa: E402
 COLUMN_WIDTH = 230
 
 CONTEXT_MENU_XML = [
+    ("Anteprima rapida", "win.preview"),
     ("Apri", "win.open-item"),
     ("Apri con…", "win.open-with"),
     ("Apri in una nuova finestra", "win.open-new-window"),

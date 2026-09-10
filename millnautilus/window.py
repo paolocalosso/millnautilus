@@ -102,6 +102,10 @@ BACKGROUND_SCHEMA = "org.gnome.desktop.background"
 # formato appunti di GNOME: "copy"/"cut" seguito dagli URI, uno per riga
 GNOME_COPIED_FILES = "x-special/gnome-copied-files"
 
+# anteprima rapida: interfaccia D-Bus implementata da GNOME Sushi
+PREVIEWER_NAME = "org.gnome.NautilusPreviewer"
+PREVIEWER_PATH = "/org/gnome/NautilusPreviewer"
+
 
 class MainWindow(Adw.ApplicationWindow):
     # il CSS è condiviso da tutte le finestre (provider per display)
@@ -346,6 +350,7 @@ class MainWindow(Adw.ApplicationWindow):
             ("copy-path", self._on_copy_path, None),
             ("properties", self._on_properties, ["<Alt>Return"]),
             ("set-wallpaper", self._on_set_wallpaper, None),
+            ("preview", self._on_quick_preview, ["space"]),
             ("extract-here", self._on_extract_here, None),
             ("extract-folder", self._on_extract_folder, None),
             ("extract-to", self._on_extract_to, None),
@@ -404,6 +409,8 @@ class MainWindow(Adw.ApplicationWindow):
             ("<Ctrl>v", "win.paste"),
             ("<Ctrl><Shift>v", "win.paste-link"),
             ("F2", "win.rename"),
+            # la listview userebbe lo spazio per la selezione: va intercettato
+            ("space", "win.preview"),
             ("Delete", "win.trash"),
             ("<Shift>Delete", "win.delete-permanently"),
         ):
@@ -940,6 +947,35 @@ class MainWindow(Adw.ApplicationWindow):
                 "\n".join(i.path_str for i in items))
             self.show_toast("Percorso copiato" if len(items) == 1
                             else f"{len(items)} percorsi copiati")
+
+    # --- anteprima rapida (GNOME Sushi)
+    def _on_quick_preview(self, *_):
+        item = self._target_item()
+        if item is None:
+            self.show_toast("Nessun elemento selezionato")
+            return
+        try:
+            bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        except GLib.Error as err:
+            self.show_toast(f"Bus di sessione non disponibile: {err.message}")
+            return
+
+        def on_called(connection, result):
+            try:
+                connection.call_finish(result)
+            except GLib.Error as err:
+                if err.matches(Gio.dbus_error_quark(),
+                               Gio.DBusError.SERVICE_UNKNOWN):
+                    self.show_toast(
+                        "Anteprima rapida non disponibile: installa GNOME Sushi")
+                else:
+                    self.show_toast(f"Anteprima non riuscita: {err.message}")
+
+        # ShowFile(uri, xid, close_if_already_shown): xid resta 0, non serve
+        # su Wayland; con True lo Spazio richiude l'anteprima già aperta
+        bus.call(PREVIEWER_NAME, PREVIEWER_PATH, PREVIEWER_NAME, "ShowFile",
+                 GLib.Variant("(sib)", (item.uri, 0, True)),
+                 None, Gio.DBusCallFlags.NONE, -1, None, on_called)
 
     # --- copia/sposta verso una destinazione scelta dal menu
     def _transfer_to(self, dest: Gio.File, move: bool):
