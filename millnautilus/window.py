@@ -102,9 +102,24 @@ BACKGROUND_SCHEMA = "org.gnome.desktop.background"
 # formato appunti di GNOME: "copy"/"cut" seguito dagli URI, uno per riga
 GNOME_COPIED_FILES = "x-special/gnome-copied-files"
 
-# anteprima rapida: interfaccia D-Bus implementata da GNOME Sushi
-PREVIEWER_NAME = "org.gnome.NautilusPreviewer"
-PREVIEWER_PATH = "/org/gnome/NautilusPreviewer"
+# Anteprima rapida: interfaccia D-Bus implementata da GNOME Sushi. Le build
+# di sviluppo (flatpak nightly) usano il nome con suffisso "Devel" e un
+# percorso oggetto derivato dall'id applicazione, quindi si provano più
+# combinazioni finché una risponde.
+PREVIEWER_IFACE = "org.gnome.NautilusPreviewer"
+PREVIEWER_NAMES = ("org.gnome.NautilusPreviewer",
+                   "org.gnome.NautilusPreviewerDevel")
+
+
+def _previewer_candidates() -> list[tuple[str, str]]:
+    """Coppie (nome bus, percorso oggetto) da tentare, senza doppioni."""
+    candidates: list[tuple[str, str]] = []
+    for name in PREVIEWER_NAMES:
+        for path in ("/" + name.replace(".", "/"),
+                     "/org/gnome/NautilusPreviewer"):
+            if (name, path) not in candidates:
+                candidates.append((name, path))
+    return candidates
 
 
 class MainWindow(Adw.ApplicationWindow):
@@ -112,6 +127,8 @@ class MainWindow(Adw.ApplicationWindow):
     _css_loaded = False
     # riserva agli appunti di sistema: (list[Gio.File], cut), condivisa
     _clipboard: tuple[list[Gio.File], bool] | None = None
+    # (nome bus, percorso) dell'anteprima rapida, una volta individuata
+    _previewer: tuple[str, str] | None = None
 
     def __init__(self, **kwargs):
         state = self._load_state()
@@ -959,22 +976,41 @@ class MainWindow(Adw.ApplicationWindow):
         except GLib.Error as err:
             self.show_toast(f"Bus di sessione non disponibile: {err.message}")
             return
+        candidates = ([MainWindow._previewer] if MainWindow._previewer
+                      else _previewer_candidates())
+        self._try_preview(bus, item.uri, candidates, 0)
+
+    def _try_preview(self, bus, uri: str, candidates, index: int):
+        if index >= len(candidates):
+            MainWindow._previewer = None
+            self.show_toast(
+                "Anteprima rapida non disponibile: installa GNOME Sushi")
+            return
+        name, path = candidates[index]
 
         def on_called(connection, result):
             try:
                 connection.call_finish(result)
+                MainWindow._previewer = (name, path)  # ricorda cosa funziona
             except GLib.Error as err:
-                if err.matches(Gio.dbus_error_quark(),
-                               Gio.DBusError.SERVICE_UNKNOWN):
-                    self.show_toast(
-                        "Anteprima rapida non disponibile: installa GNOME Sushi")
+                unknown = (
+                    err.matches(Gio.dbus_error_quark(),
+                                Gio.DBusError.SERVICE_UNKNOWN)
+                    or err.matches(Gio.dbus_error_quark(),
+                                   Gio.DBusError.UNKNOWN_OBJECT)
+                    or err.matches(Gio.dbus_error_quark(),
+                                   Gio.DBusError.UNKNOWN_METHOD)
+                    or err.matches(Gio.dbus_error_quark(),
+                                   Gio.DBusError.UNKNOWN_INTERFACE))
+                if unknown:
+                    self._try_preview(bus, uri, candidates, index + 1)
                 else:
                     self.show_toast(f"Anteprima non riuscita: {err.message}")
 
         # ShowFile(uri, xid, close_if_already_shown): xid resta 0, non serve
         # su Wayland; con True lo Spazio richiude l'anteprima già aperta
-        bus.call(PREVIEWER_NAME, PREVIEWER_PATH, PREVIEWER_NAME, "ShowFile",
-                 GLib.Variant("(sib)", (item.uri, 0, True)),
+        bus.call(name, path, PREVIEWER_IFACE, "ShowFile",
+                 GLib.Variant("(sib)", (uri, 0, True)),
                  None, Gio.DBusCallFlags.NONE, -1, None, on_called)
 
     # --- copia/sposta verso una destinazione scelta dal menu
