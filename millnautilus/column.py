@@ -96,8 +96,9 @@ class MillerColumn(Gtk.Box):
         "multi-selected": (GObject.SignalFlags.RUN_FIRST, None, (int,)),
         # doppio click / Enter su un file
         "item-activated": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
-        # richiesta drop di file in questa cartella: (list[Gio.File], move)
-        "files-dropped": (GObject.SignalFlags.RUN_FIRST, None, (object, bool)),
+        # drop di file: (list[Gio.File], Gio.File destinazione, move)
+        "files-dropped": (GObject.SignalFlags.RUN_FIRST, None,
+                          (object, object, bool)),
     }
 
     MIN_WIDTH = 150
@@ -489,6 +490,8 @@ class MillerColumn(Gtk.Box):
         gesture.connect("pressed", self._on_right_click, list_item)
         box.add_controller(gesture)
 
+        self._setup_row_drop(box, list_item)
+
         drag = Gtk.DragSource(actions=Gdk.DragAction.COPY | Gdk.DragAction.MOVE)
         drag.connect("prepare", self._on_drag_prepare, list_item)
         box.add_controller(drag)
@@ -681,6 +684,33 @@ class MillerColumn(Gtk.Box):
         except Exception:
             return Gdk.ContentProvider.new_for_value(item.uri)
 
+    def _wants_copy(self) -> bool:
+        """Ctrl premuto durante il rilascio: copia invece di spostare.
+
+        Gdk.Drop.get_actions() riporta le azioni *offerte* (qui COPY e MOVE
+        insieme), quindi non dice quale scegliere: si guarda il modificatore,
+        come fa Nautilus. Senza Ctrl l'impostazione predefinita è spostare.
+        """
+        display = self.get_display()
+        seat = display.get_default_seat() if display else None
+        keyboard = seat.get_keyboard() if seat else None
+        if keyboard is None:
+            return False
+        return bool(keyboard.get_modifier_state()
+                    & Gdk.ModifierType.CONTROL_MASK)
+
+    def _deliver_drop(self, value, dest: Gio.File) -> bool:
+        if not isinstance(value, Gdk.FileList):
+            return False
+        # non rilasciare qualcosa dentro sé stesso né nella propria cartella
+        files = [f for f in value.get_files()
+                 if not f.equal(dest) and not (f.get_parent()
+                                               and f.get_parent().equal(dest))]
+        if not files:
+            return False
+        self.emit("files-dropped", files, dest, not self._wants_copy())
+        return True
+
     def _setup_drop_target(self):
         drop = Gtk.DropTarget.new(Gdk.FileList,
                                   Gdk.DragAction.COPY | Gdk.DragAction.MOVE)
@@ -688,15 +718,26 @@ class MillerColumn(Gtk.Box):
         self.add_controller(drop)
 
     def _on_drop(self, target, value, x, y):
-        if not isinstance(value, Gdk.FileList):
+        """Rilascio sullo sfondo della colonna: destinazione = sua cartella."""
+        return self._deliver_drop(value, self.directory)
+
+    def _setup_row_drop(self, box, list_item):
+        """Rilascio su una riga: se è una cartella, la destinazione è quella."""
+        drop = Gtk.DropTarget.new(Gdk.FileList,
+                                  Gdk.DragAction.COPY | Gdk.DragAction.MOVE)
+        drop.connect("motion", self._on_row_drop_motion, list_item)
+        drop.connect("drop", self._on_row_drop, list_item)
+        box.add_controller(drop)
+
+    def _on_row_drop_motion(self, target, x, y, list_item):
+        item = list_item.get_item()
+        if item is None or not item.is_dir:
+            return 0  # non accettato: il rilascio passa alla colonna
+        return (Gdk.DragAction.COPY if self._wants_copy()
+                else Gdk.DragAction.MOVE)
+
+    def _on_row_drop(self, target, value, x, y, list_item):
+        item = list_item.get_item()
+        if item is None or not item.is_dir:
             return False
-        files = value.get_files()
-        drop_obj = target.get_current_drop()
-        move = True
-        if drop_obj:
-            move = bool(drop_obj.get_actions() & Gdk.DragAction.MOVE)
-        # non "droppare" una cartella dentro sé stessa
-        files = [f for f in files if not f.equal(self.directory)]
-        if files:
-            self.emit("files-dropped", files, move)
-        return True
+        return self._deliver_drop(value, item.gfile)

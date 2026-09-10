@@ -122,8 +122,8 @@ class MillerView(Gtk.ScrolledWindow):
         col.connect("multi-selected", self._on_multi_selected)
         col.connect("item-activated", self._on_item_activated)
         col.connect("files-dropped",
-                    lambda c, files, move:
-                    self.emit("files-dropped", files, c.directory, move))
+                    lambda c, files, dest, move:
+                    self.emit("files-dropped", files, dest, move))
         self.columns.append(col)
         self.box.append(col)
         self._ensure_min_columns()
