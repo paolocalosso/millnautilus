@@ -8,9 +8,10 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
+from gi.repository import (Adw, Gdk, Gio, GLib, GObject,  # noqa: E402
+                           Gtk, Pango)
 
-from . import fileops, pinned  # noqa: E402
+from . import fileops, jobs, pinned  # noqa: E402
 from .computer import ComputerView  # noqa: E402
 from .miller import MillerView  # noqa: E402
 from .models import FileItem  # noqa: E402
@@ -111,6 +112,9 @@ PREVIEWER_SERVICES = (
     ("org.gnome.NautilusPreviewerDevel", "/org/gnome/NautilusPreviewerDevel"),
 )
 PREVIEWER_IFACE_PREFIX = "org.gnome.NautilusPreviewer"
+
+# id della notifica mostrata quando la finestra si nasconde per lavorare
+BUSY_NOTIFICATION = "millnautilus-busy"
 
 
 def _find_show_file(xml: str) -> tuple[str, str] | None:
@@ -219,6 +223,19 @@ class MainWindow(Adw.ApplicationWindow):
                 json.dump(state, fh)
         except OSError:
             pass
+
+        if jobs.manager.busy:
+            # operazioni in corso: la finestra sparisce ma l'app resta viva
+            # finché non ha finito (vedi _on_jobs_drained)
+            self.set_visible(False)
+            app = self.get_application()
+            if app is not None:
+                label, _fraction = jobs.manager.summary()
+                notification = Gio.Notification.new("Operazioni in corso")
+                notification.set_body(
+                    f"{label}. Millnautilus si chiuderà al termine.")
+                app.send_notification(BUSY_NOTIFICATION, notification)
+            return True  # blocca la chiusura
         return False  # prosegui con la chiusura
 
     # ------------------------------------------------------------ UI
@@ -372,9 +389,66 @@ class MainWindow(Adw.ApplicationWindow):
         content_paned.set_resize_end_child(False)
         content_paned.set_shrink_end_child(False)
 
+        toolbar.add_bottom_bar(self._build_progress_bar())
         toolbar.set_content(content_paned)
         self.paned.set_end_child(toolbar)
         self.paned.set_shrink_end_child(False)
+
+    # ------------------------------------------------- avanzamento operazioni
+    def _build_progress_bar(self) -> Gtk.Revealer:
+        box = Gtk.Box(spacing=10, margin_top=6, margin_bottom=6,
+                      margin_start=12, margin_end=12)
+        self.progress_label = Gtk.Label(xalign=0, hexpand=True,
+                                        ellipsize=Pango.EllipsizeMode.MIDDLE)
+        self.progress_label.add_css_class("caption")
+        self.progress_bar = Gtk.ProgressBar(valign=Gtk.Align.CENTER)
+        self.progress_bar.set_size_request(180, -1)
+        cancel = Gtk.Button(icon_name="process-stop-symbolic",
+                            tooltip_text="Annulla operazioni",
+                            css_classes=["flat", "circular"])
+        cancel.connect("clicked", lambda *_: jobs.manager.cancel_all())
+
+        box.append(self.progress_label)
+        box.append(self.progress_bar)
+        box.append(cancel)
+
+        self.progress_revealer = Gtk.Revealer(child=box, reveal_child=False)
+        jobs.manager.connect("changed", self._on_jobs_changed)
+        jobs.manager.connect("drained", self._on_jobs_drained)
+        return self.progress_revealer
+
+    def _on_jobs_changed(self, _manager):
+        label, fraction = jobs.manager.summary()
+        self.progress_revealer.set_reveal_child(jobs.manager.busy)
+        if jobs.manager.busy:
+            self.progress_label.set_text(label)
+            self.progress_bar.set_fraction(fraction)
+
+    def _on_jobs_drained(self, _manager):
+        # se la finestra era stata nascosta in attesa, ora può chiudersi
+        if not self.get_visible():
+            app = self.get_application()
+            if app is not None:
+                app.withdraw_notification(BUSY_NOTIFICATION)
+                notification = Gio.Notification.new("Operazioni completate")
+                notification.set_body("Millnautilus ha terminato.")
+                app.send_notification(None, notification)
+            self.destroy()
+
+    def _run_job(self, description: str, run, success: str):
+        """Avvia un'operazione tracciata: `run(cancellable, on_progress, done)`."""
+        job = jobs.manager.start(description)
+
+        def on_progress(fraction, name=""):
+            jobs.manager.update(job, fraction, name)
+            return False
+
+        def on_done(error):
+            jobs.manager.finish(job)
+            self._after_op(error, success)
+            return False
+
+        run(job.cancellable, on_progress, on_done)
 
     # ------------------------------------------------------------ azioni
     def _add_actions(self):
@@ -795,11 +869,21 @@ class MainWindow(Adw.ApplicationWindow):
                 return
             if cut:
                 MainWindow._clipboard = None
-            fileops.transfer(files, dest, move=cut,
-                             on_done=lambda err: self._after_op(
-                                 err, "Spostato" if cut else "Copiato"))
+            self._start_transfer(files, dest, cut)
 
         self._read_clipboard(paste)
+
+    def _start_transfer(self, files, dest: Gio.File, move: bool):
+        """Copia/sposta tracciando l'operazione nella barra di avanzamento."""
+        what = (files[0].get_basename() if len(files) == 1
+                else f"{len(files)} elementi")
+        verb = "Spostamento" if move else "Copia"
+        self._run_job(
+            f"{verb} di {what}",
+            lambda cancellable, on_progress, on_done: fileops.transfer(
+                files, dest, move=move, on_done=on_done,
+                cancellable=cancellable, on_progress=on_progress),
+            "Spostato" if move else "Copiato")
 
     def _on_paste_link(self, *_):
         dest = self._target_dir()
@@ -842,9 +926,12 @@ class MainWindow(Adw.ApplicationWindow):
 
         def on_response(_dlg, response):
             if response == "delete":
-                fileops.delete(
-                    [i.gfile for i in items],
-                    lambda err: self._after_op(err, "Eliminato"))
+                self._run_job(
+                    f"Eliminazione di {what}",
+                    lambda cancellable, on_progress, on_done: fileops.delete(
+                        [i.gfile for i in items], on_done,
+                        cancellable=cancellable, on_progress=on_progress),
+                    "Eliminato")
 
         dialog.connect("response", on_response)
         dialog.present(self)
@@ -1064,10 +1151,7 @@ class MainWindow(Adw.ApplicationWindow):
         if not items:
             self.show_toast("Nessun elemento selezionato")
             return
-        fileops.transfer(
-            [i.gfile for i in items], dest, move=move,
-            on_done=lambda err: self._after_op(
-                err, "Spostato" if move else "Copiato"))
+        self._start_transfer([i.gfile for i in items], dest, move)
 
     def _on_transfer_to(self, _action, param, move):
         self._transfer_to(Gio.File.new_for_uri(param.get_string()), move)
@@ -1088,10 +1172,7 @@ class MainWindow(Adw.ApplicationWindow):
             except GLib.Error:
                 return  # annullato
             if folder is not None:
-                fileops.transfer(
-                    [i.gfile for i in items], folder, move=move,
-                    on_done=lambda err: self._after_op(
-                        err, "Spostato" if move else "Copiato"))
+                self._start_transfer([i.gfile for i in items], folder, move)
 
         dialog.select_folder(self, None, on_chosen)
 
@@ -1104,9 +1185,14 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _extract(self, items: list[FileItem], dest: Gio.File,
                  into_subdir: bool):
-        self.show_toast("Estrazione in corso…")
-        fileops.extract([i.gfile for i in items], dest, into_subdir,
-                        lambda err: self._after_op(err, "Estrazione completata"))
+        what = (items[0].name if len(items) == 1
+                else f"{len(items)} archivi")
+        self._run_job(
+            f"Estrazione di {what}",
+            lambda cancellable, on_progress, on_done: fileops.extract(
+                [i.gfile for i in items], dest, into_subdir, on_done,
+                on_progress=on_progress),
+            "Estrazione completata")
 
     def _on_extract_here(self, *_):
         items = self._archive_targets()
@@ -1203,6 +1289,4 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.refresh()
 
     def _on_files_dropped(self, _miller, files, dest_dir, move):
-        fileops.transfer(list(files), dest_dir, move=move,
-                         on_done=lambda err: self._after_op(
-                             err, "Spostato" if move else "Copiato"))
+        self._start_transfer(list(files), dest_dir, move)

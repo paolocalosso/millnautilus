@@ -113,21 +113,44 @@ def _delete_recursive(gfile: Gio.File, cancellable):
     gfile.delete(cancellable)
 
 
+def _progress_reporter(on_progress, index: int, total: int, name: str):
+    """Callback di avanzamento per Gio.File.copy, con limitazione a 10/s."""
+    if on_progress is None:
+        return None
+    state = {"last": 0.0}
+
+    def report(current_bytes, total_bytes, *_):
+        now = time.monotonic()
+        if now - state["last"] < 0.1 and current_bytes != total_bytes:
+            return
+        state["last"] = now
+        share = (current_bytes / total_bytes) if total_bytes else 0.0
+        GLib.idle_add(on_progress, (index + share) / total, name)
+
+    return report
+
+
 def transfer(files: list[Gio.File], dest_dir: Gio.File, move: bool,
-             on_done, cancellable: Gio.Cancellable | None = None):
+             on_done, cancellable: Gio.Cancellable | None = None,
+             on_progress=None):
     """Copia o sposta `files` in `dest_dir` in un thread.
 
-    on_done(error_message | None) viene chiamata nel main loop.
+    on_done(error_message | None) viene chiamata nel main loop; on_progress,
+    se presente, riceve (frazione, nome del file in corso).
     """
     def worker():
         error = None
+        total = len(files) or 1
         try:
-            for src in files:
+            for index, src in enumerate(files):
                 name = src.get_basename() or "file"
+                if on_progress is not None:
+                    GLib.idle_add(on_progress, index / total, name)
+                report = _progress_reporter(on_progress, index, total, name)
                 dest = _unique_dest(dest_dir, name)
                 if move:
                     try:
-                        src.move(dest, COPY_FLAGS, cancellable, None, None)
+                        src.move(dest, COPY_FLAGS, cancellable, report, None)
                         continue
                     except GLib.Error as err:
                         # move tra filesystem diversi non supportato per dir
@@ -138,13 +161,15 @@ def transfer(files: list[Gio.File], dest_dir: Gio.File, move: bool,
                         _delete_recursive(src, cancellable)
                 else:
                     try:
-                        src.copy(dest, COPY_FLAGS, cancellable, None, None)
+                        src.copy(dest, COPY_FLAGS, cancellable, report, None)
                     except GLib.Error as err:
                         if err.code != Gio.IOErrorEnum.WOULD_RECURSE:
                             raise
                         _copy_recursive(src, dest, cancellable)
         except GLib.Error as err:
-            error = err.message
+            error = None if err.matches(Gio.io_error_quark(),
+                                        Gio.IOErrorEnum.CANCELLED) \
+                else err.message
         except Exception as err:  # noqa: BLE001
             error = str(err)
         GLib.idle_add(on_done, error)
@@ -189,15 +214,22 @@ def trash(files: list[Gio.File], on_done):
     threading.Thread(target=worker, daemon=True).start()
 
 
-def delete(files: list[Gio.File], on_done):
+def delete(files: list[Gio.File], on_done,
+           cancellable: Gio.Cancellable | None = None, on_progress=None):
     """Elimina definitivamente (ricorsivo), senza passare dal cestino."""
     def worker():
         error = None
+        total = len(files) or 1
         try:
-            for gfile in files:
-                _delete_recursive(gfile, None)
+            for index, gfile in enumerate(files):
+                if on_progress is not None:
+                    GLib.idle_add(on_progress, index / total,
+                                  gfile.get_basename() or "")
+                _delete_recursive(gfile, cancellable)
         except GLib.Error as err:
-            error = err.message
+            error = None if err.matches(Gio.io_error_quark(),
+                                        Gio.IOErrorEnum.CANCELLED) \
+                else err.message
         except Exception as err:  # noqa: BLE001
             error = str(err)
         GLib.idle_add(on_done, error)
@@ -248,7 +280,7 @@ def _extract_one(src_path: str, dest_path: str):
 
 
 def extract(files: list[Gio.File], dest_dir: Gio.File, into_subdir: bool,
-            on_done):
+            on_done, on_progress=None):
     """Estrae archivi in `dest_dir`.
 
     Con `into_subdir` ogni archivio finisce in una cartella che porta il suo
@@ -261,11 +293,15 @@ def extract(files: list[Gio.File], dest_dir: Gio.File, into_subdir: bool,
             if not base_path:
                 raise RuntimeError(
                     "Estrazione non supportata su posizioni remote")
-            for src in files:
+            total = len(files) or 1
+            for index, src in enumerate(files):
                 src_path = src.get_path()
                 if not src_path:
                     raise RuntimeError(
                         "Estrazione non supportata su posizioni remote")
+                if on_progress is not None:
+                    GLib.idle_add(on_progress, index / total,
+                                  src.get_basename() or "")
                 target = base_path
                 if into_subdir:
                     folder = _unique_dest(dest_dir,
