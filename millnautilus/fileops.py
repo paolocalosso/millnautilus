@@ -113,6 +113,95 @@ def _delete_recursive(gfile: Gio.File, cancellable):
     gfile.delete(cancellable)
 
 
+# decisioni possibili su un conflitto di nomi
+REPLACE, MERGE, RENAME, SKIP, CANCEL = (
+    "replace", "merge", "rename", "skip", "cancel")
+
+
+class _Cancelled(Exception):
+    """L'utente ha annullato l'intera operazione."""
+
+
+def _decide(src: Gio.File, dest: Gio.File, handler, state: dict) -> str:
+    """Chiede cosa fare, ricordando un'eventuale scelta "per tutti"."""
+    if state.get("apply_all"):
+        return state["apply_all"]
+    if handler is None:
+        return RENAME  # nessuna interfaccia: comportamento prudente
+    decision, apply_all = handler(src, dest)
+    if apply_all:
+        state["apply_all"] = decision
+    return decision
+
+
+def _is_dir(gfile: Gio.File, cancellable) -> bool:
+    return gfile.query_file_type(
+        Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+        cancellable) == Gio.FileType.DIRECTORY
+
+
+def _merge_dir(src: Gio.File, dest: Gio.File, cancellable, handler,
+               state: dict):
+    """Unisce il contenuto di `src` in `dest`, già esistente."""
+    try:
+        dest.make_directory_with_parents(cancellable)
+    except GLib.Error as err:
+        if err.code != Gio.IOErrorEnum.EXISTS:
+            raise
+    enumerator = src.enumerate_children(
+        "standard::name", Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+        cancellable)
+    while (info := enumerator.next_file(cancellable)) is not None:
+        child = src.get_child(info.get_name())
+        _transfer_one(child, dest, False, cancellable, None, handler, state)
+    enumerator.close(cancellable)
+
+
+def _transfer_one(src: Gio.File, dest_dir: Gio.File, move: bool, cancellable,
+                  report, handler, state: dict):
+    """Trasferisce un singolo elemento, risolvendo i conflitti di nome."""
+    name = src.get_basename() or "file"
+    dest = dest_dir.get_child(name)
+    decision = None
+    if dest.query_exists(cancellable):
+        decision = _decide(src, dest, handler, state)
+        if decision == CANCEL:
+            raise _Cancelled()
+        if decision == SKIP:
+            return
+        if decision == RENAME:
+            dest = _unique_dest(dest_dir, name)
+            decision = None
+
+    if decision == MERGE and _is_dir(src, cancellable):
+        _merge_dir(src, dest, cancellable, handler, state)
+        if move:
+            _delete_recursive(src, cancellable)
+        return
+
+    flags = COPY_FLAGS
+    if decision == REPLACE:
+        flags |= Gio.FileCopyFlags.OVERWRITE
+    if move:
+        try:
+            src.move(dest, flags, cancellable, report, None)
+            return
+        except GLib.Error as err:
+            # move tra filesystem diversi non supportato per le cartelle
+            if err.code not in (Gio.IOErrorEnum.WOULD_RECURSE,
+                                Gio.IOErrorEnum.NOT_SUPPORTED):
+                raise
+            _copy_recursive(src, dest, cancellable)
+            _delete_recursive(src, cancellable)
+            return
+    try:
+        src.copy(dest, flags, cancellable, report, None)
+    except GLib.Error as err:
+        if err.code != Gio.IOErrorEnum.WOULD_RECURSE:
+            raise
+        _copy_recursive(src, dest, cancellable)
+
+
 def _progress_reporter(on_progress, index: int, total: int, name: str):
     """Callback di avanzamento per Gio.File.copy, con limitazione a 10/s."""
     if on_progress is None:
@@ -132,40 +221,28 @@ def _progress_reporter(on_progress, index: int, total: int, name: str):
 
 def transfer(files: list[Gio.File], dest_dir: Gio.File, move: bool,
              on_done, cancellable: Gio.Cancellable | None = None,
-             on_progress=None):
+             on_progress=None, conflict_handler=None):
     """Copia o sposta `files` in `dest_dir` in un thread.
 
     on_done(error_message | None) viene chiamata nel main loop; on_progress,
-    se presente, riceve (frazione, nome del file in corso).
+    se presente, riceve (frazione, nome del file in corso). conflict_handler
+    (src, dest) -> (decisione, applica_a_tutti) viene invocata dal thread di
+    lavoro quando il nome esiste già: deve bloccarsi finché l'utente sceglie.
     """
     def worker():
         error = None
         total = len(files) or 1
+        state: dict = {}
         try:
             for index, src in enumerate(files):
                 name = src.get_basename() or "file"
                 if on_progress is not None:
                     GLib.idle_add(on_progress, index / total, name)
                 report = _progress_reporter(on_progress, index, total, name)
-                dest = _unique_dest(dest_dir, name)
-                if move:
-                    try:
-                        src.move(dest, COPY_FLAGS, cancellable, report, None)
-                        continue
-                    except GLib.Error as err:
-                        # move tra filesystem diversi non supportato per dir
-                        if err.code not in (Gio.IOErrorEnum.WOULD_RECURSE,
-                                            Gio.IOErrorEnum.NOT_SUPPORTED):
-                            raise
-                        _copy_recursive(src, dest, cancellable)
-                        _delete_recursive(src, cancellable)
-                else:
-                    try:
-                        src.copy(dest, COPY_FLAGS, cancellable, report, None)
-                    except GLib.Error as err:
-                        if err.code != Gio.IOErrorEnum.WOULD_RECURSE:
-                            raise
-                        _copy_recursive(src, dest, cancellable)
+                _transfer_one(src, dest_dir, move, cancellable, report,
+                              conflict_handler, state)
+        except _Cancelled:
+            error = None
         except GLib.Error as err:
             error = None if err.matches(Gio.io_error_quark(),
                                         Gio.IOErrorEnum.CANCELLED) \

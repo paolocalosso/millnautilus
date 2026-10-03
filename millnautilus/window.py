@@ -2,6 +2,7 @@
 import json
 import os
 import sys
+import threading
 
 import gi
 
@@ -882,8 +883,58 @@ class MainWindow(Adw.ApplicationWindow):
             f"{verb} di {what}",
             lambda cancellable, on_progress, on_done: fileops.transfer(
                 files, dest, move=move, on_done=on_done,
-                cancellable=cancellable, on_progress=on_progress),
+                cancellable=cancellable, on_progress=on_progress,
+                conflict_handler=self._ask_conflict),
             "Spostato" if move else "Copiato")
+
+    def _ask_conflict(self, src: Gio.File, dest: Gio.File):
+        """Chiede cosa fare su un nome già esistente.
+
+        Viene invocata dal thread di lavoro, quindi il dialogo va creato nel
+        main loop e il thread attende la risposta.
+        """
+        answer: dict = {}
+        answered = threading.Event()
+
+        def ask():
+            is_dir = dest.query_file_type(
+                Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                None) == Gio.FileType.DIRECTORY
+            name = dest.get_basename() or dest.get_uri()
+            kind = "La cartella" if is_dir else "Il file"
+            dialog = Adw.AlertDialog(
+                heading="Esiste già",
+                body=f"{kind} «{name}» esiste già nella destinazione.")
+            check = Gtk.CheckButton(
+                label="Applica a tutti i conflitti successivi")
+            dialog.set_extra_child(check)
+
+            dialog.add_response(fileops.CANCEL, "Annulla")
+            dialog.add_response(fileops.SKIP, "Salta")
+            dialog.add_response(fileops.RENAME, "Rinomina")
+            if is_dir:
+                dialog.add_response(fileops.MERGE, "Unisci")
+                dialog.set_response_appearance(
+                    fileops.MERGE, Adw.ResponseAppearance.SUGGESTED)
+            else:
+                dialog.add_response(fileops.REPLACE, "Sostituisci")
+                dialog.set_response_appearance(
+                    fileops.REPLACE, Adw.ResponseAppearance.DESTRUCTIVE)
+            dialog.set_default_response(fileops.RENAME)
+            dialog.set_close_response(fileops.CANCEL)
+
+            def on_response(_dlg, response):
+                answer["decision"] = response
+                answer["all"] = check.get_active()
+                answered.set()
+
+            dialog.connect("response", on_response)
+            dialog.present(self)
+            return False
+
+        GLib.idle_add(ask)
+        answered.wait()
+        return answer.get("decision", fileops.CANCEL), answer.get("all", False)
 
     def _on_paste_link(self, *_):
         dest = self._target_dir()
