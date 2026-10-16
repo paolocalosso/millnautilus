@@ -14,6 +14,7 @@ from gi.repository import (Adw, Gdk, Gio, GLib, GObject,  # noqa: E402
 
 from . import fileops, jobs, pinned  # noqa: E402
 from .computer import ComputerView  # noqa: E402
+from .dualpane import DualPaneView  # noqa: E402
 from .miller import MillerView  # noqa: E402
 from .models import FileItem  # noqa: E402
 from .pathbar import PathBar  # noqa: E402
@@ -57,6 +58,15 @@ row.drop-below { border-bottom: 3px solid alpha(currentColor, 0.8); }
 row.dragging { opacity: 0.35; }
 /* evidenziazione automatica GTK del bersaglio di drop */
 row:drop(active) { background: alpha(currentColor, 0.08); }
+
+/* riquadri della modalità Total Commander: bordo sempre presente ma
+   trasparente, così evidenziare quello attivo non sposta il layout
+   (box-shadow non è affidabile su tutti i temi) */
+.file-pane {
+  border: 2px solid transparent;
+  border-radius: 12px;
+}
+.file-pane.pane-active { border-color: alpha(currentColor, 0.35); }
 
 /* chip dei preferiti nella vista Computer */
 .fav-chip {
@@ -207,6 +217,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.panel_toggle.set_active(False)
         if state.get("compact_view"):
             self.compact_toggle.set_active(True)
+        if state.get("dual_view"):
+            self.dual_toggle.set_active(True)
 
     def _on_close_request(self, *_):
         width, height = self.get_default_size()
@@ -217,6 +229,7 @@ class MainWindow(Adw.ApplicationWindow):
             "sidebar_position": self.paned.get_position(),
             "panel_visible": self.panel_toggle.get_active(),
             "compact_view": self.compact_toggle.get_active(),
+            "dual_view": self.dual_toggle.get_active(),
         }
         try:
             os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
@@ -330,6 +343,14 @@ class MainWindow(Adw.ApplicationWindow):
             tooltip_text="Cerca (Ctrl+F)", css_classes=["circular"])
         header.pack_end(self.search_btn)
 
+        # toggle modalità a due riquadri (stile Total Commander)
+        self.dual_toggle = Gtk.ToggleButton(
+            icon_name=self._dual_icon_name(),
+            tooltip_text="Due riquadri indipendenti",
+            css_classes=["circular"])
+        self.dual_toggle.connect("toggled", self._on_dual_toggled)
+        header.pack_end(self.dual_toggle)
+
         # toggle vista compatta (icone piccole, senza riga dettagli)
         self.compact_toggle = Gtk.ToggleButton(
             icon_name=self._compact_icon_name(),
@@ -351,12 +372,13 @@ class MainWindow(Adw.ApplicationWindow):
         toolbar.add_top_bar(self._build_search_bar())
 
         self.miller = MillerView()
-        self.miller.connect("selection-changed", self._on_selection_changed)
-        self.miller.connect("multi-selection-changed",
-                            self._on_multi_selection_changed)
-        self.miller.connect("location-changed", self._on_location_changed)
-        self.miller.connect("file-activated", self._on_file_activated)
-        self.miller.connect("files-dropped", self._on_files_dropped)
+        self._wire_miller(self.miller)
+
+        # modalità a due riquadri indipendenti (stile Total Commander)
+        self.dual = DualPaneView()
+        for dual_pane in self.dual.panes:
+            self._wire_miller(dual_pane.miller, header_pathbar=False)
+        self.dual.connect("active-changed", self._on_active_pane_changed)
 
         pane = Gtk.Box(css_classes=["content-pane", "view"],
                        margin_top=0, margin_bottom=12,
@@ -369,13 +391,15 @@ class MainWindow(Adw.ApplicationWindow):
                               lambda _c, f: self.navigate_to(f))
         self.view_stack = Gtk.Stack(hexpand=True)
         self.view_stack.add_named(self.miller, "miller")
+        self.view_stack.add_named(self.dual, "dual")
         self.view_stack.add_named(self.computer, "computer")
         pane.append(self.view_stack)
         self.content_pane = pane
 
         self.preview = PreviewPanel()
-        self.preview.connect("step",
-                             lambda _p, delta: self.miller.step_selection(delta))
+        self.preview.connect(
+            "step",
+            lambda _p, delta: self.active_miller.step_selection(delta))
         self.preview.set_margin_top(0)
         self.preview.set_margin_bottom(12)
         self.preview.set_margin_end(12)
@@ -394,6 +418,72 @@ class MainWindow(Adw.ApplicationWindow):
         toolbar.set_content(content_paned)
         self.paned.set_end_child(toolbar)
         self.paned.set_shrink_end_child(False)
+
+    # ------------------------------------------------------- riquadro attivo
+    def _wire_miller(self, miller: MillerView, header_pathbar: bool = True):
+        """Collega una vista a colonne agli handler della finestra."""
+        miller.connect("selection-changed", self._on_selection_changed)
+        miller.connect("multi-selection-changed",
+                       self._on_multi_selection_changed)
+        miller.connect("file-activated", self._on_file_activated)
+        miller.connect("files-dropped", self._on_files_dropped)
+        if header_pathbar:
+            # in doppio riquadro il percorso lo mostra la barra del riquadro
+            miller.connect("location-changed", self._on_location_changed)
+
+    @property
+    def dual_mode(self) -> bool:
+        return self.view_stack.get_visible_child_name() == "dual"
+
+    @property
+    def active_miller(self) -> MillerView:
+        """La vista su cui agiscono comandi e selezione."""
+        return self.dual.active.miller if self.dual_mode else self.miller
+
+    def _all_millers(self) -> list[MillerView]:
+        return [self.miller] + [p.miller for p in self.dual.panes]
+
+    def _on_active_pane_changed(self, _dual):
+        self.preview.set_file(self.active_miller.get_selected())
+        self.preview.set_position(*self.active_miller.selection_info())
+
+    def _on_dual_toggled(self, toggle):
+        if toggle.get_active():
+            self.dual.ensure_locations(self.miller.root)
+            self.view_stack.set_visible_child_name("dual")
+            self.pathbar.set_placeholder("Due riquadri")
+        else:
+            # torna alla vista singola sulla posizione del riquadro attivo
+            active_root = self.dual.active.miller.root
+            self.view_stack.set_visible_child_name("miller")
+            if active_root is not None and self.miller.root is None:
+                self.miller.set_root(active_root)
+            elif self.miller.root is not None:
+                self.pathbar.set_location(self.miller.root)
+
+    def _on_f5(self, *_):
+        if self.dual_mode:
+            self._transfer_to_other_pane(False)
+        else:
+            self.active_miller.reload_all()
+
+    def _on_switch_pane(self, *_):
+        if self.dual_mode:
+            self.dual.switch_active()
+
+    def _transfer_to_other_pane(self, move: bool):
+        if not self.dual_mode:
+            self.show_toast("Disponibile solo in modalità due riquadri")
+            return
+        items = self._target_items()
+        if not items:
+            self.show_toast("Nessun elemento selezionato")
+            return
+        dest = self.dual.inactive.current_dir
+        if dest is None:
+            self.show_toast("L'altro riquadro non ha una posizione")
+            return
+        self._start_transfer([i.gfile for i in items], dest, move)
 
     # ------------------------------------------------- avanzamento operazioni
     def _build_progress_bar(self) -> Gtk.Revealer:
@@ -472,12 +562,19 @@ class MainWindow(Adw.ApplicationWindow):
             ("properties", self._on_properties, ["<Alt>Return"]),
             ("set-wallpaper", self._on_set_wallpaper, None),
             ("preview", self._on_quick_preview, ["space"]),
+            # comandi in stile Total Commander, attivi a due riquadri
+            # F5: copia nell'altro riquadro a due riquadri, altrimenti ricarica
+            ("copy-to-other", self._on_f5, ["F5"]),
+            ("move-to-other", lambda *_: self._transfer_to_other_pane(True),
+             ["F6"]),
+            ("switch-pane", self._on_switch_pane, ["Tab"]),
             ("extract-here", self._on_extract_here, None),
             ("extract-folder", self._on_extract_folder, None),
             ("extract-to", self._on_extract_to, None),
             ("bookmark", self._on_bookmark, None),
             ("pin", self._on_pin, None),
-            ("reload", lambda *_: self.miller.reload_all(), ["<Ctrl>r", "F5"]),
+            ("reload", lambda *_: self.active_miller.reload_all(),
+             ["<Ctrl>r"]),
             ("edit-location", lambda *_: self.pathbar.start_edit(),
              ["<Ctrl>l"]),
             ("search", lambda *_: self.search_btn.set_active(
@@ -532,6 +629,10 @@ class MainWindow(Adw.ApplicationWindow):
             ("F2", "win.rename"),
             # la listview userebbe lo spazio per la selezione: va intercettato
             ("space", "win.preview"),
+            # Tab sposterebbe il focus: serve a cambiare riquadro
+            ("Tab", "win.switch-pane"),
+            ("F5", "win.copy-to-other"),
+            ("F6", "win.move-to-other"),
             ("Delete", "win.trash"),
             ("<Shift>Delete", "win.delete-permanently"),
         ):
@@ -540,7 +641,7 @@ class MainWindow(Adw.ApplicationWindow):
                 continue
             controller.add_shortcut(
                 Gtk.Shortcut.new(trigger, Gtk.NamedAction.new(action_name)))
-        self.miller.add_controller(controller)
+        self.view_stack.add_controller(controller)
 
     # ------------------------------------------------------------ helpers
     def show_toast(self, message: str):
@@ -563,7 +664,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _target_items(self) -> list[FileItem]:
         if self._context_item is not None:
             return [self._context_item]
-        return self.miller.get_selected_items()
+        return self.active_miller.get_selected_items()
 
     def _target_dir(self) -> Gio.File | None:
         if self._context_dir is not None:
@@ -571,11 +672,15 @@ class MainWindow(Adw.ApplicationWindow):
         item = self._target_item()
         if item and item.is_dir:
             return item.gfile
-        return self.miller.current_dir
+        return self.active_miller.current_dir
 
     def navigate_to(self, gfile: Gio.File, record: bool = True):
         if record:
             self._push_history(gfile)
+        if self.dual_mode:
+            # in doppio riquadro la navigazione resta dentro quello attivo
+            self.dual.active.navigate_to(gfile)
+            return
         self.view_stack.set_visible_child_name("miller")
         self.miller.set_root(gfile)
 
@@ -645,7 +750,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.show_toast(error)
         else:
             self.show_toast(message)
-        self.miller.reload_all()
+        for miller in self._all_millers():
+            miller.reload_all()
         self.sidebar.refresh()
         return False
 
@@ -654,7 +760,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._context_item = None
         self._context_dir = None
         self.preview.set_file(item)
-        self.preview.set_position(*self.miller.selection_info())
+        self.preview.set_position(*self.active_miller.selection_info())
 
     def _on_multi_selection_changed(self, _miller, count: int):
         self._context_item = None
@@ -664,8 +770,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_select_all(self, *_):
         col = self._context_column
-        if col not in self.miller.columns:
-            col = self.miller.active_column()
+        if col not in self.active_miller.columns:
+            col = self.active_miller.active_column()
         if col is not None:
             col.select_all()
 
@@ -689,10 +795,18 @@ class MainWindow(Adw.ApplicationWindow):
             self.show_toast(f"Impossibile aprire: {err.message}")
 
     def _on_go_up(self, _btn):
-        if self.miller.root:
-            parent = self.miller.root.get_parent()
+        if self.active_miller.root:
+            parent = self.active_miller.root.get_parent()
             if parent:
                 self.navigate_to(parent)
+
+    def _dual_icon_name(self) -> str:
+        theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+        for name in ("view-dual-symbolic", "view-columns-symbolic",
+                     "sidebar-show-right-symbolic", "view-paged-symbolic"):
+            if theme.has_icon(name):
+                return name
+        return "view-paged-symbolic"
 
     def _compact_icon_name(self) -> str:
         theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
@@ -707,7 +821,8 @@ class MainWindow(Adw.ApplicationWindow):
         return "view-list-symbolic"
 
     def _on_compact_toggled(self, toggle):
-        self.miller.set_compact(toggle.get_active())
+        for miller in self._all_millers():
+            miller.set_compact(toggle.get_active())
 
     # ------------------------------------------------------------ ricerca
     def _build_search_bar(self) -> Gtk.SearchBar:
@@ -743,15 +858,15 @@ class MainWindow(Adw.ApplicationWindow):
         if bar.get_search_mode():
             self.view_stack.set_visible_child_name("miller")
             self.search_entry.set_placeholder_text(
-                f"Cerca in {self.miller.filter_target_name()}…")
+                f"Cerca in {self.active_miller.filter_target_name()}…")
         else:
             self.search_entry.set_text("")
-            self.miller.set_filter("", False)
+            self.active_miller.set_filter("", False)
 
     def _apply_search(self):
         if not self.search_bar.get_search_mode():
             return
-        self.miller.set_filter(self.search_entry.get_text(),
+        self.active_miller.set_filter(self.search_entry.get_text(),
                                self.recursive_btn.get_active())
 
     def _panel_icon_name(self) -> str:
@@ -772,7 +887,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_show_hidden(self, action, value):
         action.set_state(value)
-        self.miller.set_show_hidden(value.get_boolean())
+        for miller in self._all_millers():
+            miller.set_show_hidden(value.get_boolean())
 
     # --- clipboard
     @staticmethod
@@ -1015,7 +1131,7 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.present(self)
 
     def _on_new_folder(self, *_):
-        dest = self._context_dir or self.miller.current_dir
+        dest = self._context_dir or self.active_miller.current_dir
         if dest is None:
             return
         dialog = Adw.AlertDialog(heading="Nuova cartella")
@@ -1213,7 +1329,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.show_toast("Nessun elemento selezionato")
             return
         dialog = Gtk.FileDialog(title="Sposta in…" if move else "Copia in…")
-        start = self.miller.current_dir
+        start = self.active_miller.current_dir
         if start is not None:
             dialog.set_initial_folder(start)
 
