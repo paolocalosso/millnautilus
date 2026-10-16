@@ -64,7 +64,9 @@ row:drop(active) { background: alpha(currentColor, 0.08); }
    (box-shadow non è affidabile su tutti i temi) */
 .file-pane {
   border: 2px solid transparent;
-  border-radius: 12px;
+  /* stesso raggio della card che li contiene (.content-pane): con un valore
+     minore gli angoli esterni del bordo finirebbero ritagliati */
+  border-radius: 25px;
 }
 .file-pane.pane-active { border-color: alpha(currentColor, 0.35); }
 
