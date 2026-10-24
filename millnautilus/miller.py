@@ -58,6 +58,9 @@ class MillerView(Gtk.ScrolledWindow):
         self._pinning = False
         # valore di scroll impostato dall'ultimo aggancio
         self._pin_value = 0.0
+        # geometria dell'aggiustamento all'ultimo value-changed: se cambia,
+        # lo spostamento viene dal layout e non dall'utente
+        self._last_geometry = (0.0, 0.0)
         hadj = self.get_hadjustment()
         hadj.connect("changed", self._on_hadj_changed)
         hadj.connect("value-changed", self._on_hadj_value_changed)
@@ -96,7 +99,9 @@ class MillerView(Gtk.ScrolledWindow):
         while len(self.columns) > depth:
             col = self.columns.pop()
             if col is self._scroll_target:
-                self._scroll_target = None
+                # continuo a seguire la nuova ultima colonna
+                self._scroll_target = (self.columns[-1] if self.columns
+                                       else None)
             self.box.remove(col)
         self._ensure_min_columns()
 
@@ -144,7 +149,12 @@ class MillerView(Gtk.ScrolledWindow):
     def _on_hadj_value_changed(self, adj):
         # Se lo scroll non è stato impostato da noi ed è lontano dal punto in
         # cui l'avevamo agganciato, l'utente ha scrollato: smetto di inseguire.
-        if self._pinning or self._scroll_target is None:
+        # Un cambio di pagina/estensione (es. la vista si allarga e il valore
+        # viene ricondotto nei limiti) non è uno scroll dell'utente.
+        geometry = (adj.get_upper(), adj.get_page_size())
+        layout_changed = geometry != self._last_geometry
+        self._last_geometry = geometry
+        if self._pinning or self._scroll_target is None or layout_changed:
             return
         if abs(adj.get_value() - self._pin_value) > 1:
             self._scroll_target = None
@@ -168,6 +178,16 @@ class MillerView(Gtk.ScrolledWindow):
         self._pinning = False
         self._pin_value = adj.get_value()
         return False
+
+    @property
+    def following(self) -> bool:
+        """True se la vista segue l'ultima colonna (nessuno scroll manuale)."""
+        return self._scroll_target is not None
+
+    def columns_width(self) -> int:
+        """Larghezza complessiva delle colonne reali."""
+        return sum(col.measure(Gtk.Orientation.HORIZONTAL, -1)[0]
+                   for col in self.columns)
 
     # ------------------------------------------------------------ callbacks
     def _on_item_selected(self, column: MillerColumn, item):

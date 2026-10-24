@@ -99,6 +99,11 @@ paned > separator.wide {
   opacity: 0;
 }
 
+/* sidebar sovrapposta al contenuto: deve essere opaca perché le colonne
+   possono scorrerle sotto */
+.sidebar-pane { background-color: @window_bg_color; }
+.sidebar-pane.covering { box-shadow: 1px 0 8px alpha(black, 0.18); }
+
 /* path bar */
 .path-bar-segment { padding: 2px 8px; min-height: 26px; }
 .path-bar-current label { font-weight: bold; }
@@ -107,6 +112,14 @@ paned > separator.wide {
 
 STATE_FILE = os.path.join(GLib.get_user_config_dir(),
                           "millnautilus", "state.json")
+
+# larghezza della sidebar: predefinita e minima
+SIDEBAR_WIDTH = 230
+SIDEBAR_MIN_WIDTH = 170
+# margine tra la sidebar e la card delle colonne
+CONTENT_MARGIN = 12
+# oltre questo numero di colonne le più a sinistra scivolano sotto la sidebar
+COLUMNS_BEFORE_SLIDE = 4
 
 # voce di cronologia per la vista "Computer"
 COMPUTER = object()
@@ -214,7 +227,7 @@ class MainWindow(Adw.ApplicationWindow):
         if state.get("maximized"):
             self.maximize()
         if "sidebar_position" in state:
-            self.paned.set_position(state["sidebar_position"])
+            self._set_sidebar_width(state["sidebar_position"])
         if not state.get("panel_visible", True):
             self.panel_toggle.set_active(False)
         if state.get("compact_view"):
@@ -228,7 +241,7 @@ class MainWindow(Adw.ApplicationWindow):
             "width": width,
             "height": height,
             "maximized": self.is_maximized(),
-            "sidebar_position": self.paned.get_position(),
+            "sidebar_position": self._sidebar_width,
             "panel_visible": self.panel_toggle.get_active(),
             "compact_view": self.compact_toggle.get_active(),
             "dual_view": self.dual_toggle.get_active(),
@@ -274,10 +287,16 @@ class MainWindow(Adw.ApplicationWindow):
         self.toast_overlay = Adw.ToastOverlay()
         self.set_content(self.toast_overlay)
 
-        # paned esterno: sidebar | contenuto (bordo trascinabile)
-        self.paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL,
-                               position=230)
-        self.toast_overlay.set_child(self.paned)
+        # La sidebar è sovrapposta al contenuto, che occupa tutta la
+        # larghezza: così, con molte colonne, la card può scorrerle sotto.
+        self._sidebar_width = SIDEBAR_WIDTH
+        # spostamento a sinistra della card (pixel finiti sotto la sidebar)
+        self._content_shift = 0
+        self._shift_animation: Adw.TimedAnimation | None = None
+        self._shift_target = 0
+        self._shift_update_queued = False
+        self.layout = Gtk.Overlay()
+        self.toast_overlay.set_child(self.layout)
 
         # --- sidebar
         self.sidebar = Sidebar()
@@ -289,11 +308,17 @@ class MainWindow(Adw.ApplicationWindow):
             Adw.WindowTitle(title="Millnautilus"))
         sidebar_toolbar.add_top_bar(sidebar_header)
         sidebar_toolbar.set_content(self.sidebar)
-        sidebar_toolbar.set_size_request(170, -1)
+        sidebar_toolbar.set_size_request(SIDEBAR_MIN_WIDTH, -1)
+        sidebar_toolbar.add_css_class("sidebar-pane")
         self.sidebar_pane = sidebar_toolbar
-        self.paned.set_start_child(sidebar_toolbar)
-        self.paned.set_shrink_start_child(False)
-        self.paned.set_resize_start_child(False)
+
+        # maniglia trascinabile sul bordo destro della sidebar
+        self.sidebar_handle = Gtk.Box(cursor=Gdk.Cursor.new_from_name(
+            "col-resize"))
+        drag = Gtk.GestureDrag()
+        drag.connect("drag-begin", self._on_sidebar_drag_begin)
+        drag.connect("drag-update", self._on_sidebar_drag_update)
+        self.sidebar_handle.add_controller(drag)
 
         # --- contenuto
         toolbar = Adw.ToolbarView()
@@ -306,10 +331,9 @@ class MainWindow(Adw.ApplicationWindow):
         sidebar_btn = Gtk.ToggleButton(icon_name="sidebar-show-symbolic",
                                        active=True,
                                        tooltip_text="Mostra/nascondi sidebar")
-        sidebar_btn.connect(
-            "toggled",
-            lambda b: self.sidebar_pane.set_visible(b.get_active()))
+        sidebar_btn.connect("toggled", self._on_sidebar_toggled)
         header.pack_start(sidebar_btn)
+        self.content_header = header
 
         self.back_btn = Gtk.Button(icon_name="go-previous-symbolic",
                                    tooltip_text="Indietro (Alt+←)",
@@ -384,7 +408,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         pane = Gtk.Box(css_classes=["content-pane", "view"],
                        margin_top=0, margin_bottom=12,
-                       margin_start=12, margin_end=6, hexpand=True)
+                       margin_end=6, hexpand=True)
         pane.set_overflow(Gtk.Overflow.HIDDEN)
         pane.set_size_request(280, -1)
 
@@ -395,8 +419,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.view_stack.add_named(self.miller, "miller")
         self.view_stack.add_named(self.dual, "dual")
         self.view_stack.add_named(self.computer, "computer")
+        self.view_stack.connect("notify::visible-child-name",
+                                self._queue_shift_update)
         pane.append(self.view_stack)
         self.content_pane = pane
+        hadj = self.miller.get_hadjustment()
+        hadj.connect("changed", self._queue_shift_update)
+        hadj.connect("value-changed", self._queue_shift_update)
 
         self.preview = PreviewPanel()
         self.preview.connect(
@@ -418,8 +447,108 @@ class MainWindow(Adw.ApplicationWindow):
 
         toolbar.add_bottom_bar(self._build_progress_bar())
         toolbar.set_content(content_paned)
-        self.paned.set_end_child(toolbar)
-        self.paned.set_shrink_end_child(False)
+        self.layout.set_child(toolbar)
+        self.layout.add_overlay(sidebar_toolbar)
+        self.layout.set_measure_overlay(sidebar_toolbar, True)
+        self.layout.add_overlay(self.sidebar_handle)
+        self.layout.connect("get-child-position", self._on_overlay_position)
+        self._set_sidebar_width(SIDEBAR_WIDTH)
+
+    # ------------------------------------------------------------ sidebar
+    def _sidebar_inset(self) -> int:
+        """Spazio occupato a sinistra dalla sidebar (0 se nascosta)."""
+        return self._sidebar_width if self.sidebar_pane.get_visible() else 0
+
+    def _set_sidebar_width(self, width: int):
+        minimum = self.sidebar_pane.measure(Gtk.Orientation.HORIZONTAL,
+                                            -1)[0]
+        self._sidebar_width = max(minimum, int(width))
+        self.layout.queue_allocate()
+        self._apply_sidebar_inset()
+
+    def _on_overlay_position(self, overlay, widget, rect):
+        # sidebar alta quanto la finestra e larga quanto deciso dall'utente
+        # (non quanto la sua larghezza naturale); la maniglia sul suo bordo
+        height = overlay.get_height()
+        if widget is self.sidebar_pane:
+            rect.x, rect.y = 0, 0
+            rect.width, rect.height = self._sidebar_width, height
+        else:
+            rect.x, rect.y = self._sidebar_width - 3, 0
+            rect.width, rect.height = 6, height
+        return True
+
+    def _on_sidebar_toggled(self, button):
+        self.sidebar_pane.set_visible(button.get_active())
+        self.sidebar_handle.set_visible(button.get_active())
+        self._apply_sidebar_inset()
+
+    def _apply_sidebar_inset(self):
+        """Sposta a destra della sidebar le barre e la card dei contenuti."""
+        inset = self._sidebar_inset()
+        for widget in (self.content_header, self.search_bar,
+                       self.progress_revealer):
+            widget.set_margin_start(inset)
+        self._set_content_shift(self._content_shift)
+        self._queue_shift_update()
+
+    def _on_sidebar_drag_begin(self, _gesture, _x, _y):
+        self._drag_start_width = self._sidebar_width
+
+    def _on_sidebar_drag_update(self, _gesture, dx, _dy):
+        # lascia sempre spazio alla card dei contenuti
+        limit = max(SIDEBAR_MIN_WIDTH, self.get_width() - 400)
+        self._set_sidebar_width(min(limit, self._drag_start_width + dx))
+
+    # ------------------------------------------- colonne sotto la sidebar
+    def _queue_shift_update(self, *_):
+        # differito: il margine della card non si cambia durante il layout
+        if not self._shift_update_queued:
+            self._shift_update_queued = True
+            GLib.idle_add(self._update_content_shift)
+
+    def _update_content_shift(self):
+        """Fa scivolare la card sotto la sidebar oltre la quarta colonna.
+
+        Lo spostamento copre solo l'eccedenza delle colonne rispetto alla
+        larghezza normale della card, fino al bordo della finestra; il resto
+        si scorre come al solito. Se l'utente scorre a mano la vista la card
+        torna al suo posto, così anche le prime colonne restano raggiungibili.
+        """
+        self._shift_update_queued = False
+        base = self._sidebar_inset() + CONTENT_MARGIN
+        target = 0
+        miller = self.miller
+        if (self.view_stack.get_visible_child_name() == "miller"
+                and len(miller.columns) > COLUMNS_BEFORE_SLIDE
+                and miller.following):
+            # larghezza che avrebbe la card senza spostamento
+            normal_width = (self.content_pane.get_width()
+                            + self.content_pane.get_margin_start() - base)
+            overflow = miller.columns_width() - normal_width
+            target = max(0, min(base, overflow))
+        if target != self._shift_target:
+            self._animate_content_shift(target)
+        return False
+
+    def _animate_content_shift(self, target: int):
+        self._shift_target = target
+        if self._shift_animation is not None:
+            self._shift_animation.pause()
+        self._shift_animation = Adw.TimedAnimation.new(
+            self.content_pane, self._content_shift, target, 200,
+            Adw.CallbackAnimationTarget.new(
+                lambda value: self._set_content_shift(round(value))))
+        self._shift_animation.play()
+
+    def _set_content_shift(self, shift: int):
+        base = self._sidebar_inset() + CONTENT_MARGIN
+        self._content_shift = max(0, min(base, shift))
+        self.content_pane.set_margin_start(base - self._content_shift)
+        if self._content_shift > 0:
+            self.sidebar_pane.add_css_class("covering")
+        else:
+            self.sidebar_pane.remove_css_class("covering")
 
     # ------------------------------------------------------- riquadro attivo
     def _wire_miller(self, miller: MillerView, header_pathbar: bool = True):
