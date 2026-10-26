@@ -99,10 +99,18 @@ paned > separator.wide {
   opacity: 0;
 }
 
-/* sidebar sovrapposta al contenuto: deve essere opaca perché le colonne
-   possono scorrerle sotto */
-.sidebar-pane { background-color: @window_bg_color; }
-.sidebar-pane.covering { box-shadow: 1px 0 8px alpha(black, 0.18); }
+/* Sidebar sovrapposta al contenuto: deve essere opaca perché le colonne le
+   scorrono sotto. La classe "background" è quella standard di GTK (sempre
+   implementata dai temi); la regola seguente è una rete di sicurezza se il
+   tema la disegnasse trasparente. Il bordo — non un box-shadow, che diversi
+   temi non disegnano — segnala che qualcosa è nascosto dietro. */
+.sidebar-pane {
+  background-color: @window_bg_color;
+  border-right: 1px solid transparent;
+}
+.sidebar-pane.covering {
+  border-right-color: alpha(currentColor, 0.25);
+}
 
 /* path bar */
 .path-bar-segment { padding: 2px 8px; min-height: 26px; }
@@ -308,9 +316,15 @@ class MainWindow(Adw.ApplicationWindow):
             Adw.WindowTitle(title="Millnautilus"))
         sidebar_toolbar.add_top_bar(sidebar_header)
         sidebar_toolbar.set_content(self.sidebar)
-        sidebar_toolbar.set_size_request(SIDEBAR_MIN_WIDTH, -1)
-        sidebar_toolbar.add_css_class("sidebar-pane")
-        self.sidebar_pane = sidebar_toolbar
+        # Adw.ToolbarView è trasparente per costruzione e il tema può
+        # sovrascriverne lo sfondo: lo sfondo opaco — indispensabile perché le
+        # colonne ci scorrono sotto — va messo su un contenitore nostro.
+        sidebar_holder = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                                 css_classes=["sidebar-pane", "background"])
+        sidebar_holder.append(sidebar_toolbar)
+        sidebar_toolbar.set_vexpand(True)
+        sidebar_holder.set_size_request(SIDEBAR_MIN_WIDTH, -1)
+        self.sidebar_pane = sidebar_holder
 
         # maniglia trascinabile sul bordo destro della sidebar
         self.sidebar_handle = Gtk.Box(cursor=Gdk.Cursor.new_from_name(
@@ -448,8 +462,8 @@ class MainWindow(Adw.ApplicationWindow):
         toolbar.add_bottom_bar(self._build_progress_bar())
         toolbar.set_content(content_paned)
         self.layout.set_child(toolbar)
-        self.layout.add_overlay(sidebar_toolbar)
-        self.layout.set_measure_overlay(sidebar_toolbar, True)
+        self.layout.add_overlay(self.sidebar_pane)
+        self.layout.set_measure_overlay(self.sidebar_pane, True)
         self.layout.add_overlay(self.sidebar_handle)
         self.layout.connect("get-child-position", self._on_overlay_position)
         self._set_sidebar_width(SIDEBAR_WIDTH)
