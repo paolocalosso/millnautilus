@@ -127,7 +127,7 @@ SIDEBAR_MIN_WIDTH = 170
 # margine tra la sidebar e la card delle colonne
 CONTENT_MARGIN = 12
 # oltre questo numero di colonne le più a sinistra scivolano sotto la sidebar
-COLUMNS_BEFORE_SLIDE = 4
+COLUMNS_BEFORE_SLIDE = 3
 
 # voce di cronologia per la vista "Computer"
 COMPUTER = object()
