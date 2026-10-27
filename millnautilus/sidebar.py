@@ -79,6 +79,8 @@ class Sidebar(Gtk.Box):
             ("pin", self._ctx_pin),
             ("unpin", self._ctx_unpin),
             ("unmount", self._ctx_unmount),
+            ("eject", self._ctx_eject),
+            ("safe-remove", self._ctx_safe_remove),
             ("copy-path", self._ctx_copy_path),
         ]:
             action = Gio.SimpleAction.new(name, None)
@@ -312,10 +314,19 @@ class Sidebar(Gtk.Box):
                 section2.append("Fissa alle Posizioni", "sidebar.pin")
         menu.append_section(None, section2)
 
+        # smontaggio, espulsione e rimozione sicura (come in Nautilus):
+        # "Smonta" libera il filesystem, "Espelli" riguarda i supporti
+        # estraibili, "Rimozione sicura" spegne l'unità prima di staccarla
         mount = row.mount or (row.volume.get_mount() if row.volume else None)
+        drive = self._row_drive(row)
+        section3 = Gio.Menu()
         if mount is not None and mount.can_unmount():
-            section3 = Gio.Menu()
             section3.append("Smonta", "sidebar.unmount")
+        if self._can_eject(row, mount, drive):
+            section3.append("Espelli", "sidebar.eject")
+        if drive is not None and drive.can_stop():
+            section3.append("Rimozione sicura", "sidebar.safe-remove")
+        if section3.get_n_items():
             menu.append_section(None, section3)
 
         popover = Gtk.PopoverMenu.new_from_model(menu)
@@ -388,6 +399,71 @@ class Sidebar(Gtk.Box):
 
         mount.unmount_with_operation(Gio.MountUnmountFlags.NONE, op,
                                      None, on_unmounted)
+
+    # ------------------------------------------- espulsione e rimozione
+    @staticmethod
+    def _row_drive(row: SidebarRow):
+        """L'unità fisica dietro la riga, se individuabile."""
+        if row.volume is not None:
+            return row.volume.get_drive()
+        if row.mount is not None:
+            return row.mount.get_drive()
+        return None
+
+    @staticmethod
+    def _can_eject(row: SidebarRow, mount, drive) -> bool:
+        if drive is not None:
+            return drive.can_eject()
+        if row.volume is not None:
+            return row.volume.can_eject()
+        return mount.can_eject() if mount is not None else False
+
+    def _ctx_eject(self, *_):
+        row = self._context_row
+        if row is None:
+            return
+        mount = row.mount or (row.volume.get_mount() if row.volume else None)
+        drive = self._row_drive(row)
+        op = Gtk.MountOperation.new(self.get_root())
+
+        def on_ejected(source, result):
+            try:
+                source.eject_with_operation_finish(result)
+                self._toast(f"Espulso: {row.title}")
+            except GLib.Error as err:
+                self._toast(f"Espulsione fallita: {err.message}")
+            self.refresh()
+
+        # l'unità ha la precedenza: espellerla smonta anche i suoi volumi
+        if drive is not None and drive.can_eject():
+            source = drive
+        elif row.volume is not None and row.volume.can_eject():
+            source = row.volume
+        elif mount is not None:
+            source = mount
+        else:
+            return
+        source.eject_with_operation(Gio.MountUnmountFlags.NONE, op,
+                                    None, on_ejected)
+
+    def _ctx_safe_remove(self, *_):
+        row = self._context_row
+        drive = self._row_drive(row) if row else None
+        if drive is None or not drive.can_stop():
+            return
+        op = Gtk.MountOperation.new(self.get_root())
+
+        def on_stopped(d, result):
+            try:
+                d.stop_finish(result)
+                self._toast(
+                    f"«{row.title}» può essere scollegato in sicurezza")
+            except GLib.Error as err:
+                self._toast(f"Rimozione non riuscita: {err.message}")
+            self.refresh()
+
+        # stop() smonta i volumi ancora montati e spegne l'unità
+        drive.stop(Gio.MountUnmountFlags.NONE, op, None, on_stopped)
 
     def _header_func(self, row, before):
         section = getattr(row, "section", None)
