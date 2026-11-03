@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import threading
 import time
+from collections import deque
 
 import gi
 
@@ -78,8 +79,9 @@ def _unique_dest(dest_dir: Gio.File, name: str) -> Gio.File:
     raise RuntimeError("Impossibile trovare un nome disponibile")
 
 
-def _copy_recursive(src: Gio.File, dest: Gio.File, cancellable):
-    info = src.query_info("standard::type", Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+def _copy_recursive(src: Gio.File, dest: Gio.File, cancellable, tracker=None):
+    info = src.query_info("standard::type,standard::size",
+                          Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
                           cancellable)
     if info.get_file_type() == Gio.FileType.DIRECTORY:
         try:
@@ -93,10 +95,14 @@ def _copy_recursive(src: Gio.File, dest: Gio.File, cancellable):
         while (child_info := enumerator.next_file(cancellable)) is not None:
             name = child_info.get_name()
             _copy_recursive(src.get_child(name), dest.get_child(name),
-                            cancellable)
+                            cancellable, tracker)
         enumerator.close(cancellable)
     else:
-        src.copy(dest, COPY_FLAGS, cancellable, None, None)
+        if tracker is not None:
+            tracker.set_name(src.get_basename() or "")
+        src.copy(dest, COPY_FLAGS, cancellable, _tracker_report(tracker), None)
+        if tracker is not None:
+            tracker.file_done(info.get_size())
 
 
 def _delete_recursive(gfile: Gio.File, cancellable):
@@ -141,7 +147,7 @@ def _is_dir(gfile: Gio.File, cancellable) -> bool:
 
 
 def _merge_dir(src: Gio.File, dest: Gio.File, cancellable, handler,
-               state: dict):
+               state: dict, tracker=None):
     """Unisce il contenuto di `src` in `dest`, già esistente."""
     try:
         dest.make_directory_with_parents(cancellable)
@@ -153,12 +159,12 @@ def _merge_dir(src: Gio.File, dest: Gio.File, cancellable, handler,
         cancellable)
     while (info := enumerator.next_file(cancellable)) is not None:
         child = src.get_child(info.get_name())
-        _transfer_one(child, dest, False, cancellable, None, handler, state)
+        _transfer_one(child, dest, False, cancellable, tracker, handler, state)
     enumerator.close(cancellable)
 
 
 def _transfer_one(src: Gio.File, dest_dir: Gio.File, move: bool, cancellable,
-                  report, handler, state: dict):
+                  tracker, handler, state: dict):
     """Trasferisce un singolo elemento, risolvendo i conflitti di nome."""
     name = src.get_basename() or "file"
     dest = dest_dir.get_child(name)
@@ -168,13 +174,16 @@ def _transfer_one(src: Gio.File, dest_dir: Gio.File, move: bool, cancellable,
         if decision == CANCEL:
             raise _Cancelled()
         if decision == SKIP:
+            # i byte saltati vanno comunque scalati, o la stima resta indietro
+            if tracker is not None:
+                tracker.file_done(file_size(src, cancellable))
             return
         if decision == RENAME:
             dest = _unique_dest(dest_dir, name)
             decision = None
 
     if decision == MERGE and _is_dir(src, cancellable):
-        _merge_dir(src, dest, cancellable, handler, state)
+        _merge_dir(src, dest, cancellable, handler, state, tracker)
         if move:
             _delete_recursive(src, cancellable)
         return
@@ -182,39 +191,158 @@ def _transfer_one(src: Gio.File, dest_dir: Gio.File, move: bool, cancellable,
     flags = COPY_FLAGS
     if decision == REPLACE:
         flags |= Gio.FileCopyFlags.OVERWRITE
+    report = _tracker_report(tracker)
+    directory = _is_dir(src, cancellable)
+    size = 0 if directory else file_size(src, cancellable)
+    if tracker is not None and not directory:
+        tracker.set_name(name)
     if move:
         try:
             src.move(dest, flags, cancellable, report, None)
+            if tracker is not None and not directory:
+                tracker.file_done(size)
             return
         except GLib.Error as err:
             # move tra filesystem diversi non supportato per le cartelle
             if err.code not in (Gio.IOErrorEnum.WOULD_RECURSE,
                                 Gio.IOErrorEnum.NOT_SUPPORTED):
                 raise
-            _copy_recursive(src, dest, cancellable)
+            _copy_recursive(src, dest, cancellable, tracker)
             _delete_recursive(src, cancellable)
             return
     try:
         src.copy(dest, flags, cancellable, report, None)
+        if tracker is not None and not directory:
+            tracker.file_done(size)
     except GLib.Error as err:
         if err.code != Gio.IOErrorEnum.WOULD_RECURSE:
             raise
-        _copy_recursive(src, dest, cancellable)
+        _copy_recursive(src, dest, cancellable, tracker)
 
 
-def _progress_reporter(on_progress, index: int, total: int, name: str):
-    """Callback di avanzamento per Gio.File.copy, con limitazione a 10/s."""
-    if on_progress is None:
-        return None
-    state = {"last": 0.0}
+SIZE_ATTRS = "standard::size,standard::type"
 
-    def report(current_bytes, total_bytes, *_):
-        now = time.monotonic()
-        if now - state["last"] < 0.1 and current_bytes != total_bytes:
+
+def _dir_size(gfile: Gio.File, cancellable) -> int:
+    total = 0
+    stack = [gfile]
+    while stack:
+        current = stack.pop()
+        try:
+            enumerator = current.enumerate_children(
+                "standard::name," + SIZE_ATTRS,
+                Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, cancellable)
+        except GLib.Error:
+            continue
+        while (info := enumerator.next_file(cancellable)) is not None:
+            if info.get_file_type() == Gio.FileType.DIRECTORY:
+                stack.append(current.get_child(info.get_name()))
+            else:
+                total += info.get_size()
+        enumerator.close(cancellable)
+    return total
+
+
+def _total_size(files: list[Gio.File], cancellable) -> int:
+    """Byte complessivi da trasferire: serve per percentuale e tempo residuo."""
+    total = 0
+    for gfile in files:
+        try:
+            info = gfile.query_info(
+                SIZE_ATTRS, Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                cancellable)
+        except GLib.Error:
+            continue
+        if info.get_file_type() == Gio.FileType.DIRECTORY:
+            total += _dir_size(gfile, cancellable)
+        else:
+            total += info.get_size()
+    return total
+
+
+def file_size(gfile: Gio.File, cancellable=None) -> int:
+    try:
+        return gfile.query_info(
+            "standard::size", Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+            cancellable).get_size()
+    except GLib.Error:
+        return 0
+
+
+class _Tracker:
+    """Tiene il conto dei byte trasferiti e ne ricava velocità e stima.
+
+    La velocità è misurata su una finestra scorrevole di pochi secondi: usare
+    la media dall'inizio darebbe un valore che non reagisce più ai
+    rallentamenti (tipici verso dispositivi USB o di rete).
+    """
+
+    WINDOW = 3.0       # secondi di storico per la velocità
+    MIN_INTERVAL = 0.15  # limita gli aggiornamenti dell'interfaccia
+
+    def __init__(self, total_bytes: int, on_progress):
+        self.total = total_bytes
+        self.done = 0        # byte dei file già conclusi
+        self.current = 0     # byte del file in corso
+        self.name = ""
+        self.on_progress = on_progress
+        self._samples: deque = deque()
+        self._last_emit = 0.0
+
+    @property
+    def transferred(self) -> int:
+        return self.done + self.current
+
+    def set_name(self, name: str):
+        self.name = name
+        self.emit(force=True)
+
+    def update_current(self, current_bytes: int):
+        self.current = current_bytes
+        self.emit()
+
+    def file_done(self, size: int):
+        self.done += size
+        self.current = 0
+        self.emit(force=True)
+
+    def _speed(self, now: float, done: int) -> float | None:
+        self._samples.append((now, done))
+        while len(self._samples) > 1 and now - self._samples[0][0] > self.WINDOW:
+            self._samples.popleft()
+        if len(self._samples) < 2:
+            return None
+        span = self._samples[-1][0] - self._samples[0][0]
+        moved = self._samples[-1][1] - self._samples[0][1]
+        if span < 0.5 or moved <= 0:
+            return None
+        return moved / span
+
+    def emit(self, force: bool = False):
+        if self.on_progress is None:
             return
-        state["last"] = now
-        share = (current_bytes / total_bytes) if total_bytes else 0.0
-        GLib.idle_add(on_progress, (index + share) / total, name)
+        now = time.monotonic()
+        if not force and now - self._last_emit < self.MIN_INTERVAL:
+            return
+        self._last_emit = now
+        done = self.transferred
+        speed = self._speed(now, done)
+        eta = None
+        if speed and self.total and self.total > done:
+            eta = (self.total - done) / speed
+        fraction = (done / self.total) if self.total else 0.0
+        GLib.idle_add(self.on_progress, min(1.0, fraction), self.name,
+                      {"done": done, "total": self.total,
+                       "speed": speed, "eta": eta})
+
+
+def _tracker_report(tracker: "_Tracker | None"):
+    """Callback di avanzamento da passare a Gio.File.copy/move."""
+    if tracker is None:
+        return None
+
+    def report(current_bytes, _total_bytes, *_):
+        tracker.update_current(current_bytes)
 
     return report
 
@@ -225,21 +353,24 @@ def transfer(files: list[Gio.File], dest_dir: Gio.File, move: bool,
     """Copia o sposta `files` in `dest_dir` in un thread.
 
     on_done(error_message | None) viene chiamata nel main loop; on_progress,
-    se presente, riceve (frazione, nome del file in corso). conflict_handler
+    se presente, riceve (frazione, nome del file in corso, statistiche) dove
+    le statistiche sono byte fatti/totali, velocità e stima. conflict_handler
     (src, dest) -> (decisione, applica_a_tutti) viene invocata dal thread di
     lavoro quando il nome esiste già: deve bloccarsi finché l'utente sceglie.
     """
     def worker():
         error = None
-        total = len(files) or 1
         state: dict = {}
+        tracker = None
         try:
-            for index, src in enumerate(files):
-                name = src.get_basename() or "file"
-                if on_progress is not None:
-                    GLib.idle_add(on_progress, index / total, name)
-                report = _progress_reporter(on_progress, index, total, name)
-                _transfer_one(src, dest_dir, move, cancellable, report,
+            if on_progress is not None:
+                GLib.idle_add(on_progress, 0.0, "Calcolo dimensioni…", None)
+                tracker = _Tracker(_total_size(files, cancellable),
+                                   on_progress)
+            for src in files:
+                if tracker is not None:
+                    tracker.set_name(src.get_basename() or "file")
+                _transfer_one(src, dest_dir, move, cancellable, tracker,
                               conflict_handler, state)
         except _Cancelled:
             error = None

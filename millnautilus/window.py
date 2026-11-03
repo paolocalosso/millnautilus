@@ -189,6 +189,37 @@ def _previewer_args(uri: str, signature: str) -> GLib.Variant | None:
     return GLib.Variant(f"({signature})", tuple(values))
 
 
+def _format_duration(seconds: float) -> str:
+    """Durata leggibile, con precisione che cala al crescere del tempo."""
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{max(seconds, 1)} s"
+    if seconds < 3600:
+        minutes, rest = divmod(seconds, 60)
+        return f"{minutes} min {rest:02d} s" if minutes < 10 \
+            else f"{minutes} min"
+    hours, rest = divmod(seconds, 3600)
+    return f"{hours} h {rest // 60:02d} min"
+
+
+def _format_stats(stats: dict | None) -> str:
+    """Byte fatti/totali, velocità e tempo residuo per la barra."""
+    if not stats:
+        return ""
+    parts = []
+    total = stats.get("total") or 0
+    if total:
+        parts.append(f"{GLib.format_size(stats.get('done', 0))} "
+                     f"di {GLib.format_size(total)}")
+    speed = stats.get("speed")
+    if speed:
+        parts.append(f"{GLib.format_size(int(speed))}/s")
+    eta = stats.get("eta")
+    if eta is not None:
+        parts.append(f"{_format_duration(eta)} rimanenti")
+    return "  ·  ".join(parts)
+
+
 class MainWindow(Adw.ApplicationWindow):
     # il CSS è condiviso da tutte le finestre (provider per display)
     _css_loaded = False
@@ -644,7 +675,15 @@ class MainWindow(Adw.ApplicationWindow):
                             css_classes=["flat", "circular"])
         cancel.connect("clicked", lambda *_: jobs.manager.cancel_all())
 
+        # byte, velocità e tempo residuo: etichetta separata, a larghezza
+        # propria, così il nome del file può accorciarsi senza nasconderli
+        self.progress_stats = Gtk.Label(xalign=1)
+        self.progress_stats.add_css_class("caption")
+        self.progress_stats.add_css_class("dim-label")
+        self.progress_stats.add_css_class("numeric")
+
         box.append(self.progress_label)
+        box.append(self.progress_stats)
         box.append(self.progress_bar)
         box.append(cancel)
 
@@ -654,10 +693,12 @@ class MainWindow(Adw.ApplicationWindow):
         return self.progress_revealer
 
     def _on_jobs_changed(self, _manager):
-        label, fraction = jobs.manager.summary()
+        label, stats, fraction = jobs.manager.summary()
         self.progress_revealer.set_reveal_child(jobs.manager.busy)
         if jobs.manager.busy:
             self.progress_label.set_text(label)
+            self.progress_stats.set_text(stats)
+            self.progress_stats.set_visible(bool(stats))
             self.progress_bar.set_fraction(fraction)
 
     def _on_jobs_drained(self, _manager):
@@ -675,8 +716,8 @@ class MainWindow(Adw.ApplicationWindow):
         """Avvia un'operazione tracciata: `run(cancellable, on_progress, done)`."""
         job = jobs.manager.start(description)
 
-        def on_progress(fraction, name=""):
-            jobs.manager.update(job, fraction, name)
+        def on_progress(fraction, name="", stats=None):
+            jobs.manager.update(job, fraction, name, _format_stats(stats))
             return False
 
         def on_done(error):

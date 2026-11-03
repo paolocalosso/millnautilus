@@ -21,6 +21,7 @@ class Job(GObject.Object):
         self.cancellable = cancellable
         self.fraction = 0.0
         self.detail = ""
+        self.stats = ""   # velocità e tempo residuo, già formattati
 
 
 class JobManager(GObject.Object):
@@ -46,10 +47,12 @@ class JobManager(GObject.Object):
         self.emit("changed")
         return job
 
-    def update(self, job: Job, fraction: float, detail: str = ""):
+    def update(self, job: Job, fraction: float, detail: str = "",
+               stats: str = ""):
         job.fraction = max(0.0, min(1.0, fraction))
         if detail:
             job.detail = detail
+        job.stats = stats
         self.emit("changed")
 
     def finish(self, job: Job):
@@ -67,18 +70,17 @@ class JobManager(GObject.Object):
     def busy(self) -> bool:
         return bool(self.jobs)
 
-    def summary(self) -> tuple[str, float]:
-        """Etichetta e avanzamento complessivo da mostrare nella barra."""
+    def summary(self) -> tuple[str, str, float]:
+        """Etichetta, statistiche e avanzamento da mostrare nella barra."""
         if not self.jobs:
-            return "", 0.0
+            return "", "", 0.0
         fraction = sum(j.fraction for j in self.jobs) / len(self.jobs)
         if len(self.jobs) == 1:
             job = self.jobs[0]
             label = f"{job.description} — {job.detail}" if job.detail \
                 else job.description
-        else:
-            label = f"{len(self.jobs)} operazioni in corso"
-        return label, fraction
+            return label, job.stats, fraction
+        return f"{len(self.jobs)} operazioni in corso", "", fraction
 
 
 manager = JobManager()
