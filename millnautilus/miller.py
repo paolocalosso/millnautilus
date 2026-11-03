@@ -193,6 +193,11 @@ class MillerView(Gtk.ScrolledWindow):
     def _on_item_selected(self, column: MillerColumn, item):
         if item is None:
             return
+        if column.menu_selection:
+            # selezione dovuta al menu contestuale: aggiorna solo l'anteprima,
+            # senza toccare le colonne già aperte
+            self.emit("selection-changed", item)
+            return
         self._truncate(column.depth + 1)
         if item.is_dir:
             self._add_column(item.gfile)

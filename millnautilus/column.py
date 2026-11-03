@@ -117,6 +117,9 @@ class MillerColumn(Gtk.Box):
         self._icon_theme: Gtk.IconTheme | None = None
         self._pending_select: Gio.File | None = None
         self._status_label: Gtk.Label | None = None
+        # True mentre la selezione è causata dall'apertura del menu
+        # contestuale: la vista non deve aprire la colonna successiva
+        self.menu_selection = False
         self._mount_attempted = False
         self._filter_text = ""
         self._recursive = False
@@ -573,7 +576,14 @@ class MillerColumn(Gtk.Box):
         """Seleziona la riga e apre il menu contestuale ancorato a `anchor`."""
         position = list_item.get_position()
         if not self.selection.is_selected(position):
-            self.selection.select_item(position, True)
+            # la selezione normalmente apre la cartella nella colonna
+            # successiva: aprire il menu non deve farlo (il segnale parte
+            # in modo sincrono, quindi basta alzare il flag qui attorno)
+            self.menu_selection = True
+            try:
+                self.selection.select_item(position, True)
+            finally:
+                self.menu_selection = False
         win = self.get_root()
         selected = self.get_selected_items()
         item = list_item.get_item()
