@@ -134,9 +134,13 @@ COMPUTER = object()
 
 BACKGROUND_SCHEMA = "org.gnome.desktop.background"
 
-# terminale aperto da "Apri in Tabby"; se il percorso non esiste si cerca
-# l'eseguibile nel PATH
-TERMINAL_COMMAND = ["/opt/Tabby/tabby", "--hide-scrollbars", "--no-sandbox"]
+# Terminale aperto da "Apri in Tabby". Il segnaposto {path} viene sostituito
+# con la cartella: Tabby inoltra l'avvio all'istanza già in esecuzione, quindi
+# la directory di lavoro del nuovo processo verrebbe ignorata e serve il suo
+# sottocomando "open". Se l'eseguibile non è al percorso indicato si cerca
+# nel PATH; senza segnaposto si ripiega sulla sola directory di lavoro.
+TERMINAL_COMMAND = ["/opt/Tabby/tabby", "--hide-scrollbars", "--no-sandbox",
+                    "open", "{path}"]
 
 # formato appunti di GNOME: "copy"/"cut" seguito dagli URI, uno per riga
 GNOME_COPIED_FILES = "x-special/gnome-copied-files"
@@ -1430,7 +1434,7 @@ class MainWindow(Adw.ApplicationWindow):
         if not path:
             self.show_toast("Il terminale richiede una cartella locale")
             return
-        argv = list(TERMINAL_COMMAND)
+        argv = [arg.replace("{path}", path) for arg in TERMINAL_COMMAND]
         if not os.path.exists(argv[0]):
             fallback = GLib.find_program_in_path(os.path.basename(argv[0]))
             if fallback is None:
@@ -1438,10 +1442,8 @@ class MainWindow(Adw.ApplicationWindow):
                 return
             argv[0] = fallback
         try:
-            # la posizione si passa come directory di lavoro del processo:
-            # non tutti i terminali accettano un percorso come argomento
             launcher = Gio.SubprocessLauncher.new(Gio.SubprocessFlags.NONE)
-            launcher.set_cwd(path)
+            launcher.set_cwd(path)  # utile ai terminali senza argomento
             launcher.spawnv(argv)
         except GLib.Error as err:
             self.show_toast(f"Avvio del terminale non riuscito: {err.message}")
