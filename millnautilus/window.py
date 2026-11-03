@@ -134,6 +134,10 @@ COMPUTER = object()
 
 BACKGROUND_SCHEMA = "org.gnome.desktop.background"
 
+# terminale aperto da "Apri in Tabby"; se il percorso non esiste si cerca
+# l'eseguibile nel PATH
+TERMINAL_COMMAND = ["/opt/Tabby/tabby", "--hide-scrollbars", "--no-sandbox"]
+
 # formato appunti di GNOME: "copy"/"cut" seguito dagli URI, uno per riga
 GNOME_COPIED_FILES = "x-special/gnome-copied-files"
 
@@ -744,6 +748,7 @@ class MainWindow(Adw.ApplicationWindow):
             ("open-item", self._on_open_item, None),
             ("open-with", self._on_open_with, None),
             ("open-new-window", self._on_open_new_window, ["<Ctrl>n"]),
+            ("open-terminal", self._on_open_terminal, ["<Ctrl><Shift>t"]),
             ("copy-path", self._on_copy_path, None),
             ("properties", self._on_properties, ["<Alt>Return"]),
             ("set-wallpaper", self._on_set_wallpaper, None),
@@ -1417,6 +1422,29 @@ class MainWindow(Adw.ApplicationWindow):
 
         dialog.connect("response", on_response)
         dialog.present(self)
+
+    def _on_open_terminal(self, *_):
+        """Apre Tabby nella cartella scelta (o in quella corrente)."""
+        directory = self._target_dir()
+        path = directory.get_path() if directory is not None else None
+        if not path:
+            self.show_toast("Il terminale richiede una cartella locale")
+            return
+        argv = list(TERMINAL_COMMAND)
+        if not os.path.exists(argv[0]):
+            fallback = GLib.find_program_in_path(os.path.basename(argv[0]))
+            if fallback is None:
+                self.show_toast(f"{os.path.basename(argv[0])} non trovato")
+                return
+            argv[0] = fallback
+        try:
+            # la posizione si passa come directory di lavoro del processo:
+            # non tutti i terminali accettano un percorso come argomento
+            launcher = Gio.SubprocessLauncher.new(Gio.SubprocessFlags.NONE)
+            launcher.set_cwd(path)
+            launcher.spawnv(argv)
+        except GLib.Error as err:
+            self.show_toast(f"Avvio del terminale non riuscito: {err.message}")
 
     def _on_open_new_window(self, *_):
         item = self._target_item()

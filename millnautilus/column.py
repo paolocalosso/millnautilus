@@ -19,6 +19,7 @@ CONTEXT_MENU_XML = [
     ("Apri", "win.open-item"),
     ("Apri con…", "win.open-with"),
     ("Apri in una nuova finestra", "win.open-new-window"),
+    ("Apri in Tabby", "win.open-terminal"),
     None,
     ("Copia", "win.copy"),
     ("Taglia", "win.cut"),
@@ -75,6 +76,7 @@ def build_background_menu() -> Gio.Menu:
     section1.append("Incolla", "win.paste")
     section1.append("Incolla come collegamento", "win.paste-link")
     section1.append("Nuova cartella…", "win.new-folder")
+    section1.append("Apri in Tabby", "win.open-terminal")
     menu.append_section(None, section1)
     section2 = Gio.Menu()
     section2.append("Seleziona tutto", "win.select-all")
