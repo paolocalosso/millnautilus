@@ -82,12 +82,13 @@ class FileManager1:
         try:
             args = params.unpack()
             uris = list(args[0]) if args else []
+            startup_id = args[1] if len(args) > 1 else ""
             if method == "ShowFolders":
-                self._show(uris, reveal=False, info=False)
+                self._show(uris, startup_id, reveal=False, info=False)
             elif method == "ShowItems":
-                self._show(uris, reveal=True, info=False)
+                self._show(uris, startup_id, reveal=True, info=False)
             elif method == "ShowItemProperties":
-                self._show(uris, reveal=True, info=True)
+                self._show(uris, startup_id, reveal=True, info=True)
             else:
                 invocation.return_error_literal(
                     Gio.dbus_error_quark(), Gio.DBusError.UNKNOWN_METHOD,
@@ -98,7 +99,8 @@ class FileManager1:
             invocation.return_error_literal(
                 Gio.dbus_error_quark(), Gio.DBusError.FAILED, str(err))
 
-    def _show(self, uris: list[str], reveal: bool, info: bool):
+    def _show(self, uris: list[str], startup_id: str, reveal: bool,
+              info: bool):
         if not uris:
             return
 
@@ -112,6 +114,11 @@ class FileManager1:
                 win.reveal(gfile, info=info)
             else:
                 win.navigate_to(gfile)
+            # Il token di attivazione (xdg-activation su Wayland) permette
+            # di portare la finestra in primo piano invece della notifica
+            # "Millnautilus è pronto"
+            if startup_id:
+                win.set_startup_id(startup_id)
             win.present()
             return False
 
