@@ -12,7 +12,7 @@ gi.require_version("Adw", "1")
 from gi.repository import (Adw, Gdk, Gio, GLib, GObject,  # noqa: E402
                            Gtk, Pango)
 
-from . import fileops, jobs, pinned  # noqa: E402
+from . import clipboard, fileops, jobs, pinned  # noqa: E402
 from .computer import ComputerView  # noqa: E402
 from .dualpane import DualPaneView  # noqa: E402
 from .miller import MillerView  # noqa: E402
@@ -1107,7 +1107,12 @@ class MainWindow(Adw.ApplicationWindow):
             uri_list = Gdk.ContentProvider.new_for_bytes(
                 "text/uri-list", GLib.Bytes.new(("\n".join(uris) + "\n")
                                                 .encode()))
-            provider = Gdk.ContentProvider.new_union([special, uri_list])
+            # anche come testo semplice: è il formato che vedono i gestori di
+            # appunti (GPaste) e che serve per incollare in un editor
+            text = clipboard.text_provider(
+                "\n".join(i.path_str for i in items))
+            provider = Gdk.ContentProvider.new_union(
+                [special, uri_list, text])
             self.get_clipboard().set_content(provider)
         except Exception as err:  # noqa: BLE001
             print(f"Appunti di sistema non disponibili: {err}",
@@ -1458,11 +1463,15 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_copy_path(self, *_):
         items = self._target_items()
-        if items:
-            self.get_clipboard().set(
-                "\n".join(i.path_str for i in items))
-            self.show_toast("Percorso copiato" if len(items) == 1
-                            else f"{len(items)} percorsi copiati")
+        if not items:
+            self.show_toast("Nessun elemento selezionato")
+            return
+        text = "\n".join(i.path_str for i in items)
+        if not clipboard.set_text(self, text):
+            self.show_toast("Appunti non disponibili")
+            return
+        self.show_toast("Percorso copiato" if len(items) == 1
+                        else f"{len(items)} percorsi copiati")
 
     # --- anteprima rapida (GNOME Sushi)
     def _on_quick_preview(self, *_):

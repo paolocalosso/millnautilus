@@ -8,7 +8,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import pinned, places  # noqa: E402
+from . import clipboard, pinned, places  # noqa: E402
 
 BOOKMARKS_FILE = os.path.join(GLib.get_user_config_dir(),
                               "gtk-3.0", "bookmarks")
@@ -349,8 +349,10 @@ class Sidebar(Gtk.Box):
         row = self._context_row
         if row and row.gfile is not None:
             text = row.gfile.get_path() or row.gfile.get_uri()
-            self.get_clipboard().set(text)
-            self._toast("Percorso copiato")
+            if clipboard.set_text(self, text):
+                self._toast("Percorso copiato")
+            else:
+                self._toast("Appunti non disponibili")
 
     def _ctx_bookmark_add(self, *_):
         row = self._context_row
