@@ -39,6 +39,8 @@ CONTEXT_MENU_XML = [
 ]
 
 
+COMPRESS_ENTRY = ("Comprimi…", "win.compress")
+
 EXTRACT_MENU = [
     ("Estrai qui", "win.extract-here"),
     ("Estrai qui in cartella", "win.extract-folder"),
@@ -61,11 +63,12 @@ def build_context_menu(show_extract: bool = False,
         destinations = Gio.Menu()
         destinations.append_submenu("Copia o sposta in", dest_menu)
         menu.append_section(None, destinations)
+    archive_section = Gio.Menu()
+    archive_section.append(*COMPRESS_ENTRY)
     if show_extract:
-        extract_section = Gio.Menu()
         for label, action in EXTRACT_MENU:
-            extract_section.append(label, action)
-        menu.append_section(None, extract_section)
+            archive_section.append(label, action)
+    menu.append_section(None, archive_section)
     return menu
 
 

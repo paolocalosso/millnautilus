@@ -772,6 +772,7 @@ class MainWindow(Adw.ApplicationWindow):
             ("move-to-other", lambda *_: self._transfer_to_other_pane(True),
              ["F6"]),
             ("switch-pane", self._on_switch_pane, ["Tab"]),
+            ("compress", self._on_compress, None),
             ("extract-here", self._on_extract_here, None),
             ("extract-folder", self._on_extract_folder, None),
             ("extract-to", self._on_extract_to, None),
@@ -1576,6 +1577,56 @@ class MainWindow(Adw.ApplicationWindow):
                 self._start_transfer([i.gfile for i in items], folder, move)
 
         dialog.select_folder(self, None, on_chosen)
+
+    # --- compressione
+    def _on_compress(self, *_):
+        items = self._target_items()
+        if not items:
+            self.show_toast("Nessun elemento selezionato")
+            return
+        dest = items[0].gfile.get_parent() or self._target_dir()
+        if dest is None:
+            return
+
+        default = (fileops.archive_basename(items[0].name)
+                   if len(items) == 1 else "Archivio")
+        dialog = Adw.AlertDialog(
+            heading="Comprimi",
+            body=f"{len(items)} elementi" if len(items) > 1
+            else f"«{items[0].name}»")
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        entry = Gtk.Entry(text=default, activates_default=True)
+        labels = Gtk.StringList.new([label for label, _ext
+                                     in fileops.ARCHIVE_FORMATS])
+        formats = Gtk.DropDown(model=labels, selected=0)
+        box.append(entry)
+        box.append(formats)
+        dialog.set_extra_child(box)
+        dialog.add_response("cancel", "Annulla")
+        dialog.add_response("create", "Comprimi")
+        dialog.set_response_appearance("create",
+                                       Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("create")
+        dialog.set_close_response("cancel")
+
+        def on_response(_dlg, response):
+            if response != "create":
+                return
+            name = entry.get_text().strip()
+            if not name:
+                return
+            extension = fileops.ARCHIVE_FORMATS[formats.get_selected()][1]
+            if not name.lower().endswith(extension):
+                name += extension
+            self._run_job(
+                f"Compressione in {name}",
+                lambda cancellable, on_progress, on_done: fileops.compress(
+                    [i.gfile for i in items], dest, name, extension, on_done,
+                    cancellable=cancellable, on_progress=on_progress),
+                "Archivio creato")
+
+        dialog.connect("response", on_response)
+        dialog.present(self)
 
     # --- estrazione archivi
     def _archive_targets(self) -> list[FileItem]:

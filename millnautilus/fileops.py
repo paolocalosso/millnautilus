@@ -526,6 +526,107 @@ def extract(files: list[Gio.File], dest_dir: Gio.File, into_subdir: bool,
     threading.Thread(target=worker, daemon=True).start()
 
 
+# formati offerti dalla finestra "Comprimi": (etichetta, estensione)
+ARCHIVE_FORMATS = (
+    ("ZIP", ".zip"),
+    ("tar.gz", ".tar.gz"),
+    ("tar.xz", ".tar.xz"),
+    ("7z", ".7z"),
+)
+
+
+def _archive_entries(paths: list[str]):
+    """Coppie (percorso reale, nome dentro l'archivio)."""
+    for path in paths:
+        base = os.path.basename(path.rstrip("/"))
+        if os.path.isdir(path):
+            yield path, base
+            for root, dirs, files in os.walk(path):
+                relative = os.path.relpath(root, path)
+                arc_root = base if relative == "." \
+                    else os.path.join(base, relative)
+                for name in dirs:      # anche le cartelle vuote
+                    yield os.path.join(root, name), \
+                        os.path.join(arc_root, name)
+                for name in files:
+                    yield os.path.join(root, name), \
+                        os.path.join(arc_root, name)
+        else:
+            yield path, base
+
+
+def _write_archive(paths: list[str], target: str, extension: str,
+                   cancellable, on_progress):
+    entries = list(_archive_entries(paths))
+    total = len(entries) or 1
+
+    def step(index: int, arcname: str):
+        if cancellable is not None and cancellable.is_cancelled():
+            raise _Cancelled()
+        if on_progress is not None:
+            GLib.idle_add(on_progress, index / total,
+                          os.path.basename(arcname), None)
+
+    if extension == ".zip":
+        import zipfile
+        with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
+            for index, (src, arcname) in enumerate(entries):
+                step(index, arcname)
+                archive.write(src, arcname)
+        return
+
+    import tarfile
+    mode = "w:gz" if extension == ".tar.gz" else "w:xz"
+    with tarfile.open(target, mode) as archive:
+        for index, (src, arcname) in enumerate(entries):
+            step(index, arcname)
+            archive.add(src, arcname=arcname, recursive=False)
+
+
+def compress(files: list[Gio.File], dest_dir: Gio.File, name: str,
+             extension: str, on_done,
+             cancellable: Gio.Cancellable | None = None, on_progress=None):
+    """Crea un archivio con `files` dentro `dest_dir`."""
+    def worker():
+        error = None
+        try:
+            if dest_dir.get_path() is None:
+                raise RuntimeError(
+                    "Compressione non supportata su posizioni remote")
+            paths = []
+            for gfile in files:
+                path = gfile.get_path()
+                if not path:
+                    raise RuntimeError(
+                        "Compressione non supportata su posizioni remote")
+                paths.append(path)
+
+            dest = _unique_dest(dest_dir, name)
+            target = dest.get_path()
+            if extension == ".7z":
+                tool = shutil.which("7z") or shutil.which("7za")
+                if tool is None:
+                    raise RuntimeError("7z non disponibile: installa p7zip")
+                result = subprocess.run([tool, "a", "-y", target, *paths],
+                                        capture_output=True)
+                if result.returncode != 0:
+                    message = result.stderr.decode(errors="replace").strip()
+                    raise RuntimeError(message or
+                                       f"7z: errore {result.returncode}")
+            else:
+                _write_archive(paths, target, extension, cancellable,
+                               on_progress)
+        except _Cancelled:
+            error = None
+        except GLib.Error as err:
+            error = err.message
+        except Exception as err:  # noqa: BLE001
+            error = str(err)
+        GLib.idle_add(on_done, error)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
 def rename(gfile: Gio.File, new_name: str, on_done):
     def callback(f, result):
         try:
