@@ -112,6 +112,15 @@ paned > separator.wide {
   border-right-color: alpha(currentColor, 0.25);
 }
 
+/* barra di occupazione dei dispositivi nella sidebar: sottile, non deve
+   far crescere troppo l'altezza della riga */
+.usage-bar,
+.usage-bar trough,
+.usage-bar progress {
+  min-height: 4px;
+  border-radius: 2px;
+}
+
 /* path bar */
 .path-bar-segment { padding: 2px 8px; min-height: 26px; }
 .path-bar-current label { font-weight: bold; }

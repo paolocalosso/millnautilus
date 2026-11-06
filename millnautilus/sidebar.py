@@ -29,13 +29,50 @@ class SidebarRow(Gtk.ListBoxRow):
         self.title = title
         self.section = None
         self.action = action  # es. "connect-sftp"
-        box = Gtk.Box(spacing=10, margin_top=6, margin_bottom=6,
-                      margin_start=10, margin_end=10)
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4,
+                        margin_top=6, margin_bottom=6,
+                        margin_start=10, margin_end=10)
+        box = Gtk.Box(spacing=10)
         box.append(Gtk.Image.new_from_icon_name(icon_name))
         label = Gtk.Label(label=title, xalign=0,
                           ellipsize=Pango.EllipsizeMode.END)
         box.append(label)
-        self.set_child(box)
+        outer.append(box)
+
+        # occupazione del dispositivo: nascoste finché non arrivano i dati
+        self.usage_bar = Gtk.ProgressBar(visible=False,
+                                         css_classes=["usage-bar"])
+        self.usage_label = Gtk.Label(
+            xalign=0, visible=False, ellipsize=Pango.EllipsizeMode.END,
+            css_classes=["caption", "dim-label"])
+        outer.append(self.usage_bar)
+        outer.append(self.usage_label)
+        self.set_child(outer)
+
+    def show_usage(self, cancellable: Gio.Cancellable | None = None):
+        """Interroga lo spazio del filesystem e mostra barra ed etichetta."""
+        if self.gfile is None:
+            return
+
+        def on_info(gfile, result):
+            try:
+                info = gfile.query_filesystem_info_finish(result)
+            except GLib.Error:
+                return
+            size = info.get_attribute_uint64("filesystem::size")
+            free = info.get_attribute_uint64("filesystem::free")
+            if not size:
+                return
+            self.usage_bar.set_fraction((size - free) / size)
+            self.usage_bar.set_visible(True)
+            self.usage_label.set_text(
+                f"{GLib.format_size(free)} liberi di {GLib.format_size(size)}")
+            self.usage_label.set_visible(True)
+
+        self.gfile.query_filesystem_info_async(
+            "filesystem::size,filesystem::free", GLib.PRIORITY_LOW,
+            cancellable, on_info)
 
 
 class Sidebar(Gtk.Box):
@@ -180,6 +217,8 @@ class Sidebar(Gtk.Box):
             if row.action is None:
                 self._attach_menu(row)
             self.listbox.append(row)
+            # solo i volumi montati hanno uno spazio da misurare
+            row.show_usage()
         for row in network_rows:
             row.section = "Rete"
             if row.action is None:
