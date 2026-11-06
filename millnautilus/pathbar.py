@@ -1,4 +1,6 @@
 """Path bar stile Nautilus: breadcrumb a pulsanti + modalità editabile."""
+import os
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -50,6 +52,15 @@ class PathBar(Gtk.Stack):
         self.entry = Gtk.Entry(width_chars=45, hexpand=True,
                                placeholder_text="Percorso o URI…")
         self.entry.connect("activate", self._on_entry_activate)
+        # completamento: si attiva solo quando si digita, mai cancellando
+        self._completing = False
+        self._typed = False
+        self._cache_key: str | None = None
+        self._cache_names: list[str] = []
+        self._pending_key: str | None = None
+        self.entry.get_buffer().connect(
+            "inserted-text", lambda *_: setattr(self, "_typed", True))
+        self.entry.connect("changed", self._on_entry_changed)
         key_ctrl = Gtk.EventControllerKey()
         key_ctrl.connect("key-pressed", self._on_entry_key)
         self.entry.add_controller(key_ctrl)
@@ -63,13 +74,20 @@ class PathBar(Gtk.Stack):
     # ------------------------------------------------------------ API
     def set_location(self, gfile: Gio.File):
         self._location = gfile
-        self.entry.set_text(gfile.get_path() or gfile.get_uri())
+        self._set_entry_text(gfile.get_path() or gfile.get_uri())
         self._rebuild_buttons(gfile)
+
+    def _set_entry_text(self, text: str):
+        """Imposta il testo senza far scattare il completamento."""
+        self._completing = True
+        self.entry.set_text(text)
+        self._completing = False
+        self._typed = False
 
     def set_placeholder(self, label: str):
         """Mostra una singola etichetta non navigabile (es. "Computer")."""
         self._location = None
-        self.entry.set_text("")
+        self._set_entry_text("")
         while (child := self.buttons_box.get_first_child()) is not None:
             self.buttons_box.remove(child)
         placeholder = Gtk.Label(label=label)
@@ -86,6 +104,118 @@ class PathBar(Gtk.Stack):
 
     def stop_edit(self):
         self.set_visible_child_name("buttons")
+
+    # ------------------------------------------------------ completamento
+    def _on_entry_changed(self, _entry):
+        # niente completamento mentre si cancella: suggerire di nuovo ciò che
+        # l'utente sta togliendo renderebbe impossibile accorciare il percorso
+        if self._completing or not self._typed:
+            self._typed = False
+            return
+        self._typed = False
+        self._complete()
+
+    @staticmethod
+    def _split(text: str) -> tuple[str, str] | None:
+        """Divide il testo in (parte già completa, prefisso da completare)."""
+        base, sep, prefix = text.rpartition("/")
+        if not sep:
+            return None
+        return base + "/", prefix
+
+    @staticmethod
+    def _directory_for(base: str) -> Gio.File | None:
+        """Gio.File della cartella in cui cercare, da un percorso o URI."""
+        if base.startswith("~"):
+            base = GLib.get_home_dir() + base[1:]
+        if base.startswith("/"):
+            return Gio.File.new_for_path(base)
+        if "://" in base:
+            return Gio.File.new_for_uri(base)
+        return None
+
+    def _complete(self):
+        text = self.entry.get_text()
+        # solo con il cursore in fondo: a metà testo il completamento
+        # sovrascriverebbe quello che segue
+        if self.entry.get_position() != len(text):
+            return
+        split = self._split(text)
+        if split is None:
+            return
+        base, prefix = split
+        directory = self._directory_for(base)
+        if directory is None:
+            return
+
+        key = directory.get_uri()
+        if key != self._cache_key:
+            self._load_names(directory, key)
+            return  # al termine il completamento viene ritentato
+
+        matches = [n for n in self._cache_names if n.startswith(prefix)]
+        if not matches:
+            return
+        common = os.path.commonprefix(matches)
+        if len(common) <= len(prefix):
+            return
+        # inserisce il resto come testo selezionato: continuando a digitare
+        # viene sostituito, con Tab o → lo si accetta
+        self._completing = True
+        self.entry.set_text(base + common)
+        self.entry.select_region(len(text), -1)
+        self._completing = False
+
+    def _load_names(self, directory: Gio.File, key: str):
+        """Elenca la cartella in modo asincrono (su SFTP può essere lenta)."""
+        if self._pending_key == key:
+            return
+        self._pending_key = key
+
+        def on_done(gfile, result):
+            self._pending_key = None
+            try:
+                infos = gfile.enumerate_children_finish(result)
+            except GLib.Error:
+                return
+            names = []
+            while (info := infos.next_file(None)) is not None:
+                name = info.get_name()
+                if info.get_file_type() == Gio.FileType.DIRECTORY:
+                    name += "/"
+                names.append(name)
+            infos.close(None)
+            self._cache_key = key
+            self._cache_names = names
+            # il testo potrebbe essere cambiato nel frattempo: si ritenta solo
+            # se la cartella di riferimento è ancora questa
+            split = self._split(self.entry.get_text())
+            if split is not None:
+                current = self._directory_for(split[0])
+                if current is not None and current.get_uri() == key:
+                    self._complete()
+
+        directory.enumerate_children_async(
+            "standard::name,standard::type", Gio.FileQueryInfoFlags.NONE,
+            GLib.PRIORITY_DEFAULT, None, on_done)
+
+    def _accept_completion(self) -> bool:
+        """Tab: conferma il suggerimento spostando il cursore in fondo."""
+        bounds = self.entry.get_selection_bounds()
+        # a seconda della versione di PyGObject può arrivare (ok, inizio,
+        # fine), (inizio, fine) oppure nulla
+        if not bounds:
+            return False
+        if len(bounds) == 3:
+            has_selection, start, end = bounds
+            if not has_selection:
+                return False
+        else:
+            start, end = bounds
+        if start == end:
+            return False
+        self.entry.set_position(-1)
+        return True
 
     # ------------------------------------------------------------ breadcrumb
     def _rebuild_buttons(self, gfile: Gio.File):
@@ -173,8 +303,12 @@ class PathBar(Gtk.Stack):
     def _on_entry_key(self, _ctrl, keyval, _keycode, _state):
         if keyval == Gdk.KEY_Escape:
             if self._location:
-                self.entry.set_text(self._location.get_path()
-                                    or self._location.get_uri())
+                self._set_entry_text(self._location.get_path()
+                                     or self._location.get_uri())
             self.stop_edit()
+            return True
+        if keyval == Gdk.KEY_Tab:
+            # Tab accetta il suggerimento invece di spostare il focus
+            self._accept_completion()
             return True
         return False
