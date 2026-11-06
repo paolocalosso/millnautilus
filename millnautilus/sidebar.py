@@ -180,7 +180,8 @@ class Sidebar(Gtk.Box):
         self._add("user-trash-symbolic", "Cestino",
                   Gio.File.new_for_uri("trash:///"), section="Posizioni")
         self._add("drive-harddisk-symbolic", "File system",
-                  Gio.File.new_for_path("/"), section="Posizioni")
+                  Gio.File.new_for_path("/"),
+                  section="Posizioni").show_usage()
 
         # Dispositivi e Rete: raccogli prima, poi aggiungi raggruppati
         # per sezione (così ogni intestazione compare una sola volta)
@@ -224,6 +225,8 @@ class Sidebar(Gtk.Box):
             if row.action is None:
                 self._attach_menu(row)
             self.listbox.append(row)
+            # "Connetti al server…" non ha un gfile: show_usage non fa nulla
+            row.show_usage()
 
         # Preferiti (riordinabili via drag & drop)
         for uri, label in self._read_bookmarks():
@@ -235,11 +238,12 @@ class Sidebar(Gtk.Box):
             self.listbox.append(row)
 
     def _add(self, icon: str, title: str, gfile: Gio.File, section: str,
-             mount: Gio.Mount | None = None):
+             mount: Gio.Mount | None = None) -> SidebarRow:
         row = SidebarRow(icon, title, gfile, mount=mount)
         row.section = section
         self._attach_menu(row)
         self.listbox.append(row)
+        return row
 
     # ------------------------------------------------------------ riordino
     @staticmethod
