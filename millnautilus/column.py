@@ -14,30 +14,33 @@ from .models import FILE_ATTRS, FileItem, sort_items  # noqa: E402
 
 COLUMN_WIDTH = 230
 
+# Il menu va tenuto corto: se supera lo spazio disponibile sopra o sotto il
+# puntatore, GTK lo rende scorrevole e le ultime voci spariscono di fatto.
+# Le voci di uso raro stanno quindi nel sottomenu "Altro".
 CONTEXT_MENU_XML = [
     ("Anteprima rapida", "win.preview"),
     ("Apri", "win.open-item"),
     ("Apri con…", "win.open-with"),
-    ("Apri in una nuova finestra", "win.open-new-window"),
     ("Apri in Tabby", "win.open-terminal"),
     None,
     ("Copia", "win.copy"),
     ("Taglia", "win.cut"),
     ("Incolla", "win.paste"),
-    ("Incolla come collegamento", "win.paste-link"),
-    ("Copia percorso", "win.copy-path"),
     None,
     ("Rinomina…", "win.rename"),
     ("Sposta nel cestino", "win.trash"),
     ("Elimina definitivamente", "win.delete-permanently"),
-    None,
+]
+
+OTHER_MENU = [
+    ("Apri in una nuova finestra", "win.open-new-window"),
+    ("Incolla come collegamento", "win.paste-link"),
+    ("Copia percorso", "win.copy-path"),
     ("Imposta come sfondo", "win.set-wallpaper"),
     ("Nuova cartella…", "win.new-folder"),
     ("Aggiungi ai preferiti", "win.bookmark"),
     ("Fissa alle Posizioni", "win.pin"),
-    ("Proprietà", "win.properties"),
 ]
-
 
 COMPRESS_ENTRY = ("Comprimi…", "win.compress")
 
@@ -46,6 +49,8 @@ EXTRACT_MENU = [
     ("Estrai qui in cartella", "win.extract-folder"),
     ("Estrai in…", "win.extract-to"),
 ]
+
+PROPERTIES_ENTRY = ("Proprietà", "win.properties")
 
 
 def build_context_menu(show_extract: bool = False,
@@ -59,16 +64,29 @@ def build_context_menu(show_extract: bool = False,
         else:
             section.append(*entry)
     menu.append_section(None, section)
-    if dest_menu is not None:
-        destinations = Gio.Menu()
-        destinations.append_submenu("Copia o sposta in", dest_menu)
-        menu.append_section(None, destinations)
+
+    # archivi: voce singola quando c'è solo "Comprimi…", sottomenu quando
+    # l'elemento è un archivio e si aggiungono le estrazioni
     archive_section = Gio.Menu()
-    archive_section.append(*COMPRESS_ENTRY)
     if show_extract:
+        archive = Gio.Menu()
+        archive.append(*COMPRESS_ENTRY)
         for label, action in EXTRACT_MENU:
-            archive_section.append(label, action)
+            archive.append(label, action)
+        archive_section.append_submenu("Archivio", archive)
+    else:
+        archive_section.append(*COMPRESS_ENTRY)
+    if dest_menu is not None:
+        archive_section.append_submenu("Copia o sposta in", dest_menu)
+    other = Gio.Menu()
+    for label, action in OTHER_MENU:
+        other.append(label, action)
+    archive_section.append_submenu("Altro", other)
     menu.append_section(None, archive_section)
+
+    last = Gio.Menu()
+    last.append(*PROPERTIES_ENTRY)
+    menu.append_section(None, last)
     return menu
 
 
