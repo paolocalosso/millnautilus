@@ -8,6 +8,7 @@ File explorer GTK4/libadwaita con vista a colonne (Miller view), ispirato a Naut
 
 - **Miller columns**: navigazione a colonne affiancate; selezionando una cartella si apre la colonna successiva
   - oltre la quarta colonna, le colonne più a sinistra scivolano sotto la sidebar per lasciare spazio alle nuove; scorrendo a mano verso sinistra tornano visibili
+  - le icone delle cartelle mostrano in miniatura la prima immagine contenuta (solo cartelle locali)
 - **Sidebar**: Home e cartelle XDG, cestino, file system, dischi/volumi (GVolumeMonitor), mount di rete, connessione a server SFTP/SMB via GVfs, preferiti (bookmarks GTK condivisi con Nautilus); larghezza regolabile trascinandone il bordo
 - **Pannello destro** con toggle in header bar:
   - *Anteprima*: immagini, file di testo, thumbnail di sistema per PDF/documenti

@@ -37,6 +37,13 @@ CSS = """
 }
 .miller-column { border-right: 1px solid alpha(currentColor, 0.12); }
 
+/* anteprima del contenuto sulle icone delle cartelle */
+.folder-thumb {
+  border-radius: 3px;
+  border: 1px solid alpha(white, 0.85);
+  box-shadow: 0 1px 2px alpha(black, 0.35);
+}
+
 /* emblema dei collegamenti simbolici sulle icone */
 .link-emblem {
   background-color: alpha(currentColor, 0.25);

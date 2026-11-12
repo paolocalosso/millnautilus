@@ -9,7 +9,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import (Gdk, Gio, GLib, GObject, Graphene,  # noqa: E402
                            Gtk, Pango)
 
-from . import colwidths, destinations, sortprefs  # noqa: E402
+from . import colwidths, destinations, folderthumbs, sortprefs  # noqa: E402
 from .models import FILE_ATTRS, FileItem, sort_items  # noqa: E402
 
 COLUMN_WIDTH = 230
@@ -489,8 +489,13 @@ class MillerColumn(Gtk.Box):
                                pixel_size=12, visible=False,
                                halign=Gtk.Align.START, valign=Gtk.Align.END,
                                css_classes=["link-emblem"])
+        # anteprima del contenuto sulle icone delle cartelle
+        box.thumb = Gtk.Image(pixel_size=14, visible=False,
+                              halign=Gtk.Align.END, valign=Gtk.Align.END,
+                              css_classes=["folder-thumb"])
         icon_overlay = Gtk.Overlay(valign=Gtk.Align.CENTER)
         icon_overlay.set_child(box.icon)
+        icon_overlay.add_overlay(box.thumb)
         icon_overlay.add_overlay(box.emblem)
 
         text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
@@ -529,6 +534,7 @@ class MillerColumn(Gtk.Box):
         self._apply_density(box)
         box.icon.set_from_paintable(self._lookup_icon(item))
         box.emblem.set_visible(item.is_symlink)
+        self._show_folder_thumb(box, item)
         box.label.set_text(item.name)
         box.menu_btn.set_visible(item.is_dir and not self.compact)
         # riferimento all'elemento attualmente legato a questa riga: serve a
@@ -540,6 +546,21 @@ class MillerColumn(Gtk.Box):
                 self._cancellable,
                 lambda _n, b=box, it=item: self._on_count_ready(b, it))
 
+    def _show_folder_thumb(self, box, item: FileItem):
+        texture = None
+        if item.is_dir:
+            texture = folderthumbs.lookup(
+                item,
+                lambda tex, b=box, it=item: self._on_thumb_ready(b, it, tex))
+        box.thumb.set_from_paintable(texture)
+        box.thumb.set_visible(texture is not None)
+
+    def _on_thumb_ready(self, box, item, texture):
+        # la riga può essere stata riciclata per un altro elemento
+        if getattr(box, "item", None) is item:
+            box.thumb.set_from_paintable(texture)
+            box.thumb.set_visible(True)
+
     def _on_count_ready(self, box, item):
         # aggiorna solo se la riga è ancora legata allo stesso elemento
         if getattr(box, "item", None) is item:
@@ -548,6 +569,7 @@ class MillerColumn(Gtk.Box):
     def _apply_density(self, box):
         """Modalità compatta: icone piccole, niente riga dei dettagli."""
         box.icon.set_pixel_size(16 if self.compact else 24)
+        box.thumb.set_pixel_size(9 if self.compact else 14)
         box.set_margin_top(0 if self.compact else 3)
         box.set_margin_bottom(0 if self.compact else 3)
         box.set_spacing(6 if self.compact else 8)
