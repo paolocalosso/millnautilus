@@ -12,7 +12,8 @@ FILE_ATTRS = ",".join([
     "standard::symlink-target",
     "time::modified", "time::created",
     "unix::mode", "owner::user", "owner::group",
-    "thumbnail::path", "access::can-read", "access::can-write",
+    "thumbnail::path", "thumbnail::is-valid",
+    "access::can-read", "access::can-write",
 ])
 
 
