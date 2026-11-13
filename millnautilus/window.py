@@ -12,7 +12,7 @@ gi.require_version("Adw", "1")
 from gi.repository import (Adw, Gdk, Gio, GLib, GObject,  # noqa: E402
                            Gtk, Pango)
 
-from . import clipboard, fileops, jobs, pinned  # noqa: E402
+from . import clipboard, fileops, jobs, placestore  # noqa: E402
 from .computer import ComputerView  # noqa: E402
 from .dualpane import DualPaneView  # noqa: E402
 from .miller import MillerView  # noqa: E402
@@ -1736,7 +1736,7 @@ class MainWindow(Adw.ApplicationWindow):
         if self.sidebar.is_fixed_place(gfile.get_uri()):
             self.show_toast(f"«{name}» è già tra le Posizioni")
             return
-        pinned.add(gfile.get_uri(), name)
+        placestore.add(placestore.PINNED, gfile.get_uri(), name)
         self.show_toast(f"Fissato alle Posizioni: {name}")
         self.sidebar.refresh()
 

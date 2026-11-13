@@ -13,7 +13,7 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import Gio, GLib  # noqa: E402
 
-from . import pinned  # noqa: E402
+from . import placestore  # noqa: E402
 from .sidebar import Sidebar  # noqa: E402
 
 MAX_ENTRIES = 25    # sottocartelle elencate per livello
@@ -62,7 +62,7 @@ def _roots() -> list[tuple[str, Gio.File, int]]:
     for mount in monitor.get_mounts():
         add(mount.get_name(), mount.get_root(), MOUNT_DEPTH)
 
-    for uri, label in pinned.load():
+    for uri, label in placestore.load(placestore.PINNED):
         add(label, Gio.File.new_for_uri(uri), MAX_DEPTH)
     for uri, label in Sidebar._read_bookmarks():
         add(label, Gio.File.new_for_uri(uri), MAX_DEPTH)

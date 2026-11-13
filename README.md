@@ -9,7 +9,7 @@ File explorer GTK4/libadwaita con vista a colonne (Miller view), ispirato a Naut
 - **Miller columns**: navigazione a colonne affiancate; selezionando una cartella si apre la colonna successiva
   - oltre la quarta colonna, le colonne più a sinistra scivolano sotto la sidebar per lasciare spazio alle nuove; scorrendo a mano verso sinistra tornano visibili
   - miniature: i file mostrano la propria anteprima (immagini, e PDF/video/documenti tramite i thumbnailer di GNOME se è installato `gir1.2-gnomedesktop-4.0`); le cartelle locali mostrano una pila con le miniature dei primi file contenuti
-- **Sidebar**: Home e cartelle XDG, cestino, file system, dischi/volumi (GVolumeMonitor), mount di rete, connessione a server SFTP/SMB via GVfs, preferiti (bookmarks GTK condivisi con Nautilus); larghezza regolabile trascinandone il bordo
+- **Sidebar**: Home e cartelle XDG, cestino, file system, dischi/volumi (GVolumeMonitor), mount di rete, connessione a server SFTP/SMB via GVfs, preferiti e posizioni fissate (condivisi tra macchine via `places.json`, rispecchiati nei bookmark GTK); larghezza regolabile trascinandone il bordo
 - **Pannello destro** con toggle in header bar:
   - *Anteprima*: immagini, file di testo, thumbnail di sistema per PDF/documenti
   - *Informazioni*: tipo, dimensione, data, permessi, proprietario, percorso, numero elementi
@@ -119,7 +119,7 @@ chiuso (`nautilus -q`); Millnautilus lo acquisisce al primo avvio successivo.
 ## Note
 
 - L'anteprima PDF/documenti usa le thumbnail generate dal sistema (`thumbnail::path`); se non esiste ancora una thumbnail viene mostrata l'icona del tipo file
-- I preferiti sono letti/scritti in `~/.config/gtk-3.0/bookmarks`, lo stesso file usato da Nautilus
+- Preferiti e Posizioni fissate stanno insieme in `places.json`, nella cartella del progetto: essendo versionato con git si sincronizzano tra le macchine. I percorsi sono salvati in forma portabile (`xdg:DOCUMENTS`, `home:…`), quindi funzionano anche con GNOME in lingue diverse (`Documenti` / `Documents`). I preferiti vengono comunque rispecchiati in `~/.config/gtk-3.0/bookmarks`, così Nautilus continua a vederli
 - Le connessioni SFTP usano GVfs: le credenziali sono chieste da `Gtk.MountOperation` e gestite dal portachiavi di sistema
 
 ## Struttura
@@ -132,6 +132,7 @@ millnautilus/
   miller.py              MillerView (contenitore colonne)
   column.py              MillerColumn (singola colonna, DnD, menu contestuale)
   sidebar.py             sidebar (posizioni, volumi, SFTP, preferiti)
+  placestore.py          preferiti e posizioni fissate, in forma portabile
   preview.py             pannello anteprima/informazioni
   fileops.py             operazioni file async via Gio
   models.py              FileItem (Gio.File + Gio.FileInfo)

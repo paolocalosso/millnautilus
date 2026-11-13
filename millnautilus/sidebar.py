@@ -8,10 +8,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import clipboard, pinned, places  # noqa: E402
-
-BOOKMARKS_FILE = os.path.join(GLib.get_user_config_dir(),
-                              "gtk-3.0", "bookmarks")
+from . import clipboard, placestore, places  # noqa: E402
 
 
 def _xdg(directory) -> str | None:
@@ -160,7 +157,7 @@ class Sidebar(Gtk.Box):
                 gfile = Gio.File.new_for_path(path)
                 self._fixed_uris.add(gfile.get_uri())
                 entries.append((icon, label, gfile))
-        for uri, label in pinned.load():
+        for uri, label in placestore.load(placestore.PINNED):
             if uri in self._fixed_uris:
                 continue
             entries.append(("folder-symbolic", label,
@@ -302,149 +299,6 @@ class Sidebar(Gtk.Box):
         self.refresh()
         return True
 
-    @staticmethod
-    def reorder_bookmark(uri: str, target_uri: str, after: bool):
-        """Sposta `uri` prima/dopo `target_uri` nel file bookmarks."""
-        try:
-            with open(BOOKMARKS_FILE, encoding="utf-8") as fh:
-                lines = [l.rstrip("\n") for l in fh if l.strip()]
-        except OSError:
-            return
-        dragged = next((l for l in lines
-                        if l.split(" ", 1)[0] == uri), None)
-        if dragged is None:
-            return
-        lines.remove(dragged)
-        index = next((i for i, l in enumerate(lines)
-                      if l.split(" ", 1)[0] == target_uri), None)
-        if index is None:
-            lines.append(dragged)
-        else:
-            lines.insert(index + 1 if after else index, dragged)
-        with open(BOOKMARKS_FILE, "w", encoding="utf-8") as fh:
-            fh.write("\n".join(lines) + "\n")
-
-    # ------------------------------------------------------------ menu ctx
-    def _attach_menu(self, row: SidebarRow):
-        gesture = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
-        gesture.connect("pressed", self._on_row_right_click, row)
-        row.add_controller(gesture)
-
-    def _on_row_right_click(self, gesture, n_press, x, y, row: SidebarRow):
-        self._context_row = row
-        menu = Gio.Menu()
-
-        section1 = Gio.Menu()
-        if row.gfile is not None:
-            section1.append("Apri", "sidebar.open")
-            section1.append("Copia percorso", "sidebar.copy-path")
-        menu.append_section(None, section1)
-
-        section2 = Gio.Menu()
-        if row.section == "Preferiti":
-            section2.append("Rimuovi dai preferiti", "sidebar.bookmark-remove")
-        elif (row.gfile is not None
-              and (row.gfile.get_uri_scheme() or "file") != "trash"):
-            section2.append("Aggiungi ai preferiti", "sidebar.bookmark-add")
-        # fissa/sblocca dalle Posizioni (solo cartelle reali non già fisse)
-        if row.gfile is not None and row.gfile.get_path() is not None:
-            uri = row.gfile.get_uri()
-            if pinned.is_pinned(uri):
-                section2.append("Rimuovi dalle Posizioni",
-                                "sidebar.unpin")
-            elif (uri not in getattr(self, "_fixed_uris", set())
-                  and (row.gfile.get_uri_scheme() or "file") != "trash"):
-                section2.append("Fissa alle Posizioni", "sidebar.pin")
-        menu.append_section(None, section2)
-
-        # smontaggio, espulsione e rimozione sicura (come in Nautilus):
-        # "Smonta" libera il filesystem, "Espelli" riguarda i supporti
-        # estraibili, "Rimozione sicura" spegne l'unità prima di staccarla
-        mount = row.mount or (row.volume.get_mount() if row.volume else None)
-        drive = self._row_drive(row)
-        section3 = Gio.Menu()
-        if mount is not None and mount.can_unmount():
-            section3.append("Smonta", "sidebar.unmount")
-        if self._can_eject(row, mount, drive):
-            section3.append("Espelli", "sidebar.eject")
-        if drive is not None and drive.can_stop():
-            section3.append("Rimozione sicura", "sidebar.safe-remove")
-        if section3.get_n_items():
-            menu.append_section(None, section3)
-
-        popover = Gtk.PopoverMenu.new_from_model(menu)
-        popover.set_parent(row)
-        popover.set_has_arrow(False)
-        rect = Gdk.Rectangle()
-        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
-        popover.set_pointing_to(rect)
-        popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
-        popover.popup()
-
-    def _ctx_open(self, *_):
-        row = self._context_row
-        if row and row.gfile is not None:
-            self.emit("location-selected", row.gfile)
-        elif row and row.volume is not None:
-            self._mount_volume(row.volume)
-
-    def _ctx_copy_path(self, *_):
-        row = self._context_row
-        if row and row.gfile is not None:
-            text = row.gfile.get_path() or row.gfile.get_uri()
-            if clipboard.set_text(self, text):
-                self._toast("Percorso copiato")
-            else:
-                self._toast("Appunti non disponibili")
-
-    def _ctx_bookmark_add(self, *_):
-        row = self._context_row
-        if row and row.gfile is not None:
-            self.add_bookmark(row.gfile, row.title)
-            self._toast(f"Aggiunto ai preferiti: {row.title}")
-            self.refresh()
-
-    def _ctx_bookmark_remove(self, *_):
-        row = self._context_row
-        if row and row.gfile is not None:
-            self.remove_bookmark(row.gfile)
-            self._toast(f"Rimosso dai preferiti: {row.title}")
-            self.refresh()
-
-    def _ctx_pin(self, *_):
-        row = self._context_row
-        if row and row.gfile is not None:
-            pinned.add(row.gfile.get_uri(), row.title)
-            self._toast(f"Fissato alle Posizioni: {row.title}")
-            self.refresh()
-
-    def _ctx_unpin(self, *_):
-        row = self._context_row
-        if row and row.gfile is not None:
-            pinned.remove(row.gfile.get_uri())
-            self._toast(f"Rimosso dalle Posizioni: {row.title}")
-            self.refresh()
-
-    def _ctx_unmount(self, *_):
-        row = self._context_row
-        if row is None:
-            return
-        mount = row.mount or (row.volume.get_mount() if row.volume else None)
-        if mount is None:
-            return
-        op = Gtk.MountOperation.new(self.get_root())
-
-        def on_unmounted(m, result):
-            try:
-                m.unmount_with_operation_finish(result)
-                self._toast(f"Smontato: {row.title}")
-            except GLib.Error as err:
-                self._toast(f"Smontaggio fallito: {err.message}")
-            self.refresh()
-
-        mount.unmount_with_operation(Gio.MountUnmountFlags.NONE, op,
-                                     None, on_unmounted)
-
     # ------------------------------------------- espulsione e rimozione
     @staticmethod
     def _row_drive(row: SidebarRow):
@@ -525,25 +379,11 @@ class Sidebar(Gtk.Box):
     # ------------------------------------------------------------ preferiti
     @staticmethod
     def _read_bookmarks():
-        bookmarks = []
-        try:
-            with open(BOOKMARKS_FILE, encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    parts = line.split(" ", 1)
-                    uri = parts[0]
-                    label = (parts[1] if len(parts) > 1
-                             else GLib.uri_unescape_string(
-                                 uri.rsplit("/", 1)[-1], None) or uri)
-                    bookmarks.append((uri, label))
-        except OSError:
-            pass
-        return bookmarks
+        return placestore.load(placestore.BOOKMARKS)
 
     def _watch_bookmarks(self):
-        gfile = Gio.File.new_for_path(BOOKMARKS_FILE)
+        """Ricarica se il file dei luoghi cambia (es. dopo un git pull)."""
+        gfile = Gio.File.new_for_path(placestore.PLACES_FILE)
         try:
             self._bookmark_monitor = gfile.monitor_file(
                 Gio.FileMonitorFlags.NONE, None)
@@ -557,30 +397,15 @@ class Sidebar(Gtk.Box):
 
     @staticmethod
     def add_bookmark(gfile: Gio.File, label: str):
-        os.makedirs(os.path.dirname(BOOKMARKS_FILE), exist_ok=True)
-        line = f"{gfile.get_uri()} {label}\n"
-        try:
-            with open(BOOKMARKS_FILE, encoding="utf-8") as fh:
-                if any(l.split(" ", 1)[0] == gfile.get_uri()
-                       for l in fh if l.strip()):
-                    return
-        except OSError:
-            pass
-        with open(BOOKMARKS_FILE, "a", encoding="utf-8") as fh:
-            fh.write(line)
+        placestore.add(placestore.BOOKMARKS, gfile.get_uri(), label)
 
     @staticmethod
     def remove_bookmark(gfile: Gio.File):
-        uri = gfile.get_uri()
-        try:
-            with open(BOOKMARKS_FILE, encoding="utf-8") as fh:
-                lines = fh.readlines()
-        except OSError:
-            return
-        kept = [l for l in lines
-                if not l.strip() or l.split(" ", 1)[0].strip() != uri]
-        with open(BOOKMARKS_FILE, "w", encoding="utf-8") as fh:
-            fh.writelines(kept)
+        placestore.remove(placestore.BOOKMARKS, gfile.get_uri())
+
+    @staticmethod
+    def reorder_bookmark(uri: str, target_uri: str, after: bool):
+        placestore.reorder(placestore.BOOKMARKS, uri, target_uri, after)
 
     # ------------------------------------------------------------ interazione
     def _on_row_activated(self, listbox, row: SidebarRow):
