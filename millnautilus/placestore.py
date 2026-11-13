@@ -1,17 +1,31 @@
-"""Preferiti e Posizioni fissate in un unico file dentro il repository.
+"""Preferiti e Posizioni fissate in un unico file.
 
-Il file sta accanto al codice (non in ~/.config) così viene sincronizzato con
-git tra le varie macchine. I percorsi sono salvati in forma portabile: le
-cartelle standard diventano token tipo "xdg:DOCUMENTS", che su ogni macchina
-si risolvono nella cartella giusta anche se GNOME è in un'altra lingua
-("Documenti" qui, "Documents" là).
+Per sincronizzarli tra più macchine basta puntare la variabile d'ambiente
+MILLNAUTILUS_PLACES a un file dentro una cartella sincronizzata (Koofr,
+pCloud, …); altrimenti si usa ~/.config/millnautilus/places.json.
+
+I percorsi sono salvati in forma portabile: le cartelle standard diventano
+token tipo "xdg:DOCUMENTS", che su ogni macchina si risolvono nella cartella
+giusta anche se GNOME è in un'altra lingua ("Documenti" qui, "Documents" là).
 """
 import json
 import os
 
 from gi.repository import GLib
 
-PLACES_FILE = os.path.join(
+
+def _places_file() -> str:
+    override = os.environ.get("MILLNAUTILUS_PLACES")
+    if override:
+        return os.path.expanduser(override)
+    return os.path.join(GLib.get_user_config_dir(),
+                        "millnautilus", "places.json")
+
+
+PLACES_FILE = _places_file()
+
+# posizione usata in passato (dentro il repository): serve solo a migrare
+LEGACY_PLACES_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "places.json")
 
@@ -111,6 +125,7 @@ def _read() -> dict:
 
 def _write(data: dict):
     try:
+        os.makedirs(os.path.dirname(PLACES_FILE), exist_ok=True)
         with open(PLACES_FILE, "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=2, ensure_ascii=False)
             fh.write("\n")
@@ -120,7 +135,20 @@ def _write(data: dict):
 
 
 def _migrate() -> dict:
-    """Prima esecuzione: recupera i preferiti GTK e le posizioni fissate."""
+    """Prima esecuzione: recupera quel che c'è già, senza perdere nulla."""
+    # file nella vecchia posizione (dentro il repository): si riusa com'è
+    try:
+        with open(LEGACY_PLACES_FILE, encoding="utf-8") as fh:
+            legacy = json.load(fh)
+        if isinstance(legacy, dict):
+            data = {key: [e for e in legacy.get(key, [])
+                          if isinstance(e, list) and len(e) == 2]
+                    for key in (BOOKMARKS, PINNED)}
+            _write(data)
+            return data
+    except (OSError, ValueError):
+        pass
+
     data = {BOOKMARKS: [], PINNED: []}
     try:
         with open(GTK_BOOKMARKS, encoding="utf-8") as fh:

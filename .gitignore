@@ -1,2 +1,5 @@
 __pycache__/
 *.pyc
+
+# luoghi: ora in ~/.config (o dove punta MILLNAUTILUS_PLACES)
+places.json
