@@ -299,6 +299,131 @@ class Sidebar(Gtk.Box):
         self.refresh()
         return True
 
+    @staticmethod
+    def reorder_bookmark(uri: str, target_uri: str, after: bool):
+        placestore.reorder(placestore.BOOKMARKS, uri, target_uri, after)
+
+    # ------------------------------------------------------------ menu ctx
+    def _attach_menu(self, row: SidebarRow):
+        gesture = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+        gesture.connect("pressed", self._on_row_right_click, row)
+        row.add_controller(gesture)
+
+    def _on_row_right_click(self, gesture, n_press, x, y, row: SidebarRow):
+        self._context_row = row
+        menu = Gio.Menu()
+
+        section1 = Gio.Menu()
+        if row.gfile is not None:
+            section1.append("Apri", "sidebar.open")
+            section1.append("Copia percorso", "sidebar.copy-path")
+        menu.append_section(None, section1)
+
+        section2 = Gio.Menu()
+        if row.section == "Preferiti":
+            section2.append("Rimuovi dai preferiti", "sidebar.bookmark-remove")
+        elif (row.gfile is not None
+              and (row.gfile.get_uri_scheme() or "file") != "trash"):
+            section2.append("Aggiungi ai preferiti", "sidebar.bookmark-add")
+        # fissa/sblocca dalle Posizioni (solo cartelle reali non già fisse)
+        if row.gfile is not None and row.gfile.get_path() is not None:
+            uri = row.gfile.get_uri()
+            if placestore.contains(placestore.PINNED, uri):
+                section2.append("Rimuovi dalle Posizioni",
+                                "sidebar.unpin")
+            elif (uri not in getattr(self, "_fixed_uris", set())
+                  and (row.gfile.get_uri_scheme() or "file") != "trash"):
+                section2.append("Fissa alle Posizioni", "sidebar.pin")
+        menu.append_section(None, section2)
+
+        # smontaggio, espulsione e rimozione sicura (come in Nautilus):
+        # "Smonta" libera il filesystem, "Espelli" riguarda i supporti
+        # estraibili, "Rimozione sicura" spegne l'unità prima di staccarla
+        mount = row.mount or (row.volume.get_mount() if row.volume else None)
+        drive = self._row_drive(row)
+        section3 = Gio.Menu()
+        if mount is not None and mount.can_unmount():
+            section3.append("Smonta", "sidebar.unmount")
+        if self._can_eject(row, mount, drive):
+            section3.append("Espelli", "sidebar.eject")
+        if drive is not None and drive.can_stop():
+            section3.append("Rimozione sicura", "sidebar.safe-remove")
+        if section3.get_n_items():
+            menu.append_section(None, section3)
+
+        popover = Gtk.PopoverMenu.new_from_model(menu)
+        popover.set_parent(row)
+        popover.set_has_arrow(False)
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+        popover.set_pointing_to(rect)
+        popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
+        popover.popup()
+
+    def _ctx_open(self, *_):
+        row = self._context_row
+        if row and row.gfile is not None:
+            self.emit("location-selected", row.gfile)
+        elif row and row.volume is not None:
+            self._mount_volume(row.volume)
+
+    def _ctx_copy_path(self, *_):
+        row = self._context_row
+        if row and row.gfile is not None:
+            text = row.gfile.get_path() or row.gfile.get_uri()
+            if clipboard.set_text(self, text):
+                self._toast("Percorso copiato")
+            else:
+                self._toast("Appunti non disponibili")
+
+    def _ctx_bookmark_add(self, *_):
+        row = self._context_row
+        if row and row.gfile is not None:
+            self.add_bookmark(row.gfile, row.title)
+            self._toast(f"Aggiunto ai preferiti: {row.title}")
+            self.refresh()
+
+    def _ctx_bookmark_remove(self, *_):
+        row = self._context_row
+        if row and row.gfile is not None:
+            self.remove_bookmark(row.gfile)
+            self._toast(f"Rimosso dai preferiti: {row.title}")
+            self.refresh()
+
+    def _ctx_pin(self, *_):
+        row = self._context_row
+        if row and row.gfile is not None:
+            placestore.add(placestore.PINNED, row.gfile.get_uri(), row.title)
+            self._toast(f"Fissato alle Posizioni: {row.title}")
+            self.refresh()
+
+    def _ctx_unpin(self, *_):
+        row = self._context_row
+        if row and row.gfile is not None:
+            placestore.remove(placestore.PINNED, row.gfile.get_uri())
+            self._toast(f"Rimosso dalle Posizioni: {row.title}")
+            self.refresh()
+
+    def _ctx_unmount(self, *_):
+        row = self._context_row
+        if row is None:
+            return
+        mount = row.mount or (row.volume.get_mount() if row.volume else None)
+        if mount is None:
+            return
+        op = Gtk.MountOperation.new(self.get_root())
+
+        def on_unmounted(m, result):
+            try:
+                m.unmount_with_operation_finish(result)
+                self._toast(f"Smontato: {row.title}")
+            except GLib.Error as err:
+                self._toast(f"Smontaggio fallito: {err.message}")
+            self.refresh()
+
+        mount.unmount_with_operation(Gio.MountUnmountFlags.NONE, op,
+                                     None, on_unmounted)
+
     # ------------------------------------------- espulsione e rimozione
     @staticmethod
     def _row_drive(row: SidebarRow):
@@ -402,10 +527,6 @@ class Sidebar(Gtk.Box):
     @staticmethod
     def remove_bookmark(gfile: Gio.File):
         placestore.remove(placestore.BOOKMARKS, gfile.get_uri())
-
-    @staticmethod
-    def reorder_bookmark(uri: str, target_uri: str, after: bool):
-        placestore.reorder(placestore.BOOKMARKS, uri, target_uri, after)
 
     # ------------------------------------------------------------ interazione
     def _on_row_activated(self, listbox, row: SidebarRow):
