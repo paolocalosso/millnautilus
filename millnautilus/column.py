@@ -1,14 +1,14 @@
 """Singola colonna della Miller view."""
+import math
 import sys
 import threading
 
 import gi
 
 gi.require_version("Gtk", "4.0")
-gi.require_version("Adw", "1")
 
-from gi.repository import (Adw, Gdk, Gio, GLib, GObject,  # noqa: E402
-                           Graphene, Gtk, Pango)
+from gi.repository import (Gdk, Gio, GLib, GObject, Graphene,  # noqa: E402
+                           Gtk, Pango)
 
 from . import colwidths, destinations, sortprefs, thumbnails  # noqa: E402
 from .models import FILE_ATTRS, FileItem, sort_items  # noqa: E402
@@ -146,7 +146,7 @@ class MillerColumn(Gtk.Box):
         self._status_label: Gtk.Label | None = None
         # il contenuto compare in dissolvenza alla prima apertura
         self._first_load = True
-        self._fade: Adw.TimedAnimation | None = None
+        self._fade: int | None = None  # id della tick callback in corso
         # True mentre la selezione è causata dall'apertura del menu
         # contestuale: la vista non deve aprire la colonna successiva
         self.menu_selection = False
@@ -385,14 +385,39 @@ class MillerColumn(Gtk.Box):
 
         Solo la prima volta: ripeterla a ogni ricarica (dopo un'operazione su
         file o un cambio di ordinamento) sarebbe inutilmente appariscente.
-        Adw.TimedAnimation rispetta da sé la preferenza di sistema sulle
-        animazioni, quindi non serve controllarla qui.
+
+        Non si usa Adw.TimedAnimation perché salta subito alla fine se il
+        widget non è ancora mappato — ed è proprio il caso di una colonna
+        appena aggiunta, il cui contenuto locale arriva prima che GTK l'abbia
+        disegnata. Una tick callback invece scatta solo a widget visibile,
+        quindi la dissolvenza parte esattamente quando la lista compare.
         """
-        target = Adw.CallbackAnimationTarget.new(self.listview.set_opacity)
-        self._fade = Adw.TimedAnimation.new(self.listview, 0.0, 1.0,
-                                            FADE_DURATION, target)
-        self._fade.set_easing(Adw.Easing.EASE_OUT_CUBIC)
-        self._fade.play()
+        settings = Gtk.Settings.get_default()
+        if settings is not None and not settings.props.gtk_enable_animations:
+            self.listview.set_opacity(1.0)  # animazioni disattivate
+            return
+
+        duration = FADE_DURATION * 1000  # il frame clock usa microsecondi
+        state = {"start": None}
+
+        def tick(widget, clock):
+            now = clock.get_frame_time()
+            if state["start"] is None:
+                state["start"] = now
+            progress = min(1.0, (now - state["start"]) / duration)
+            # ease-in-out sinusoidale: la variazione è distribuita su tutta
+            # la durata (una ease-out arriverebbe quasi a 1 in un terzo del
+            # tempo, e l'effetto risulterebbe impercettibile)
+            widget.set_opacity((1.0 - math.cos(math.pi * progress)) / 2.0)
+            if progress >= 1.0:
+                self._fade = None
+                return GLib.SOURCE_REMOVE
+            return GLib.SOURCE_CONTINUE
+
+        if self._fade is not None:
+            self.listview.remove_tick_callback(self._fade)
+        self.listview.set_opacity(0.0)
+        self._fade = self.listview.add_tick_callback(tick)
 
     def select_file(self, gfile: Gio.File):
         """Seleziona `gfile` appena il contenuto è caricato."""
@@ -484,6 +509,9 @@ class MillerColumn(Gtk.Box):
         # senza contenuto la dissolvenza non parte: la lista resterebbe
         # invisibile se poi arrivasse qualcosa
         self._first_load = False
+        if self._fade is not None:
+            self.listview.remove_tick_callback(self._fade)
+            self._fade = None
         self.listview.set_opacity(1.0)
         self._show_status(message)
 
