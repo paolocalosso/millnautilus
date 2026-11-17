@@ -5,14 +5,18 @@ import threading
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
 
-from gi.repository import (Gdk, Gio, GLib, GObject, Graphene,  # noqa: E402
-                           Gtk, Pango)
+from gi.repository import (Adw, Gdk, Gio, GLib, GObject,  # noqa: E402
+                           Graphene, Gtk, Pango)
 
 from . import colwidths, destinations, sortprefs, thumbnails  # noqa: E402
 from .models import FILE_ATTRS, FileItem, sort_items  # noqa: E402
 
 COLUMN_WIDTH = 230
+
+# durata della dissolvenza del contenuto, in millisecondi
+FADE_DURATION = 180
 
 # Il menu va tenuto corto: se supera lo spazio disponibile sopra o sotto il
 # puntatore, GTK lo rende scorrevole e le ultime voci spariscono di fatto.
@@ -140,6 +144,9 @@ class MillerColumn(Gtk.Box):
         self._icon_theme: Gtk.IconTheme | None = None
         self._pending_select: Gio.File | None = None
         self._status_label: Gtk.Label | None = None
+        # il contenuto compare in dissolvenza alla prima apertura
+        self._first_load = True
+        self._fade: Adw.TimedAnimation | None = None
         # True mentre la selezione è causata dall'apertura del menu
         # contestuale: la vista non deve aprire la colonna successiva
         self.menu_selection = False
@@ -168,6 +175,9 @@ class MillerColumn(Gtk.Box):
         factory.connect("bind", self._on_bind)
 
         self.listview = Gtk.ListView(model=self.selection, factory=factory)
+        # parte invisibile: la dissolvenza la porta a 1 quando il contenuto
+        # è pronto, evitando il lampo della lista vuota
+        self.listview.set_opacity(0.0)
         self.listview.set_single_click_activate(False)
         self.listview.set_enable_rubberband(True)
         self.listview.connect("activate", self._on_activate)
@@ -358,6 +368,9 @@ class MillerColumn(Gtk.Box):
         items = sort_items(items, self._sort_by, self._sort_desc)
         self.store.remove_all()
         self.store.splice(0, 0, items)
+        if self._first_load:
+            self._first_load = False
+            self._fade_in()
 
         if self._pending_select is not None:
             target = self._pending_select
@@ -366,6 +379,20 @@ class MillerColumn(Gtk.Box):
                 if item.gfile.equal(target):
                     self.select_position(i)
                     break
+
+    def _fade_in(self):
+        """Dissolvenza del contenuto al primo caricamento della colonna.
+
+        Solo la prima volta: ripeterla a ogni ricarica (dopo un'operazione su
+        file o un cambio di ordinamento) sarebbe inutilmente appariscente.
+        Adw.TimedAnimation rispetta da sé la preferenza di sistema sulle
+        animazioni, quindi non serve controllarla qui.
+        """
+        target = Adw.CallbackAnimationTarget.new(self.listview.set_opacity)
+        self._fade = Adw.TimedAnimation.new(self.listview, 0.0, 1.0,
+                                            FADE_DURATION, target)
+        self._fade.set_easing(Adw.Easing.EASE_OUT_CUBIC)
+        self._fade.play()
 
     def select_file(self, gfile: Gio.File):
         """Seleziona `gfile` appena il contenuto è caricato."""
@@ -454,6 +481,10 @@ class MillerColumn(Gtk.Box):
         self._populate()
 
     def _show_error(self, message: str):
+        # senza contenuto la dissolvenza non parte: la lista resterebbe
+        # invisibile se poi arrivasse qualcosa
+        self._first_load = False
+        self.listview.set_opacity(1.0)
         self._show_status(message)
 
     def _show_status(self, message: str):
