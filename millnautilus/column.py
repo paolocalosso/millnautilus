@@ -16,7 +16,7 @@ from .models import FILE_ATTRS, FileItem, sort_items  # noqa: E402
 COLUMN_WIDTH = 230
 
 # durata della dissolvenza del contenuto, in millisecondi
-FADE_DURATION = 180
+FADE_DURATION = 250
 
 # Il menu va tenuto corto: se supera lo spazio disponibile sopra o sotto il
 # puntatore, GTK lo rende scorrevole e le ultime voci spariscono di fatto.
