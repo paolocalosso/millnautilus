@@ -124,6 +124,14 @@ paned > separator.wide {
 /* path bar */
 .path-bar-segment { padding: 2px 8px; min-height: 26px; }
 .path-bar-current label { font-weight: bold; }
+
+/* menù contestuali semitrasparenti, così si vede il blur che Blur my Shell
+   mette dietro ai popup delle app (opzione "blur-menus"); il raggio
+   coincide con il menu-corner-radius di BMS */
+popover.menu > contents {
+  background-color: alpha(@popover_bg_color, 0.65);
+  border-radius: 25px;
+}
 """
 
 
