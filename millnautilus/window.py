@@ -214,6 +214,24 @@ def _previewer_args(uri: str, signature: str) -> GLib.Variant | None:
     return GLib.Variant(f"({signature})", tuple(values))
 
 
+def _focus_entry_on_show(entry: Gtk.Entry, select_end: int = -1):
+    """Mette il focus su `entry` quando il dialogo compare.
+
+    Adw.AlertDialog alla comparsa dà il focus al pulsante predefinito: si
+    aspetta che il campo sia mappato e poi, in idle (cioè dopo quella
+    assegnazione), si sposta il focus e si seleziona il testo voluto.
+    """
+    def focus():
+        entry.grab_focus()
+        entry.select_region(0, select_end)
+        return False
+
+    def on_map(_widget):
+        GLib.idle_add(focus)
+
+    entry.connect("map", on_map)
+
+
 def _format_duration(seconds: float) -> str:
     """Durata leggibile, con precisione che cala al crescere del tempo."""
     seconds = int(seconds)
@@ -1346,6 +1364,12 @@ class MainWindow(Adw.ApplicationWindow):
                                lambda err: self._after_op(err, "Rinominato"))
 
         dialog.connect("response", on_response)
+        # selezione del solo nome, estensione esclusa: scrivendo si sostituisce
+        # il nome e "foto.jpg" resta ".jpg" (le cartelle vengono selezionate
+        # per intero, i file nascosti tipo ".bashrc" pure)
+        stem = (item.name if item.is_dir
+                else fileops.archive_basename(item.name))
+        _focus_entry_on_show(entry, len(stem))
         dialog.present(self)
 
     def _on_new_folder(self, *_):
@@ -1369,6 +1393,7 @@ class MainWindow(Adw.ApplicationWindow):
                                    lambda err: self._after_op(err, "Creata"))
 
         dialog.connect("response", on_response)
+        _focus_entry_on_show(entry)
         dialog.present(self)
 
     def _on_open_item(self, *_):
@@ -1634,6 +1659,7 @@ class MainWindow(Adw.ApplicationWindow):
                 "Archivio creato")
 
         dialog.connect("response", on_response)
+        _focus_entry_on_show(entry)
         dialog.present(self)
 
     # --- estrazione archivi

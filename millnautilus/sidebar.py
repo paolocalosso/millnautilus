@@ -578,6 +578,8 @@ class Sidebar(Gtk.Box):
                 self._mount_uri(entry.get_text().strip())
 
         dialog.connect("response", on_response)
+        entry.connect("map", lambda e: GLib.idle_add(
+            lambda: (e.grab_focus(), False)[1]))
         dialog.present(win)
 
     def _mount_uri(self, uri: str):
