@@ -514,6 +514,10 @@ class MainWindow(Adw.ApplicationWindow):
         hadj = self.miller.get_hadjustment()
         hadj.connect("changed", self._queue_shift_update)
         hadj.connect("value-changed", self._queue_shift_update)
+        # anche a ogni navigazione: tornando indietro le colonne diminuiscono
+        # e la card deve uscire da sotto la sidebar, senza dipendere solo dai
+        # segnali dell'aggiustamento (che non sempre arrivano in quel caso)
+        self.miller.connect("location-changed", self._queue_shift_update)
 
         self.preview = PreviewPanel()
         self.preview.connect(
@@ -615,7 +619,15 @@ class MainWindow(Adw.ApplicationWindow):
                             + self.content_pane.get_margin_start() - base)
             overflow = miller.columns_width() - normal_width
             target = max(0, min(base, overflow))
-        if target != self._shift_target:
+        # Si confronta con la posizione reale quando nessuna animazione è in
+        # corso: confrontare sempre con l'ultimo obiettivo lascerebbe la card
+        # bloccata sotto la sidebar se un'animazione è stata interrotta o
+        # saltata e l'obiettivo memorizzato non corrisponde più al vero.
+        playing = (self._shift_animation is not None
+                   and self._shift_animation.get_state()
+                   == Adw.AnimationState.PLAYING)
+        goal = self._shift_target if playing else self._content_shift
+        if target != goal:
             self._animate_content_shift(target)
         return False
 
