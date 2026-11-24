@@ -22,13 +22,14 @@ from gi.repository import Gio, GLib, GObject
 
 from . import placestore
 
-# (id, etichetta, colore): l'id è quello salvato nel file, il colore viene
-# dalla tavolozza GNOME (red_3, yellow_3, …)
+# (id, etichetta, (colore su tema chiaro, colore su tema scuro)): l'id è
+# quello salvato nel file. Tavolozza gruvbox: le tinte "neutral" sul chiaro,
+# le "bright" sullo scuro, come fa gruvbox stesso nelle due varianti.
 TAGS = (
-    ("red", "Rosso", "#e01b24"),
-    ("yellow", "Giallo", "#f6d32d"),
-    ("green", "Verde", "#33d17a"),
-    ("blue", "Blu", "#3584e4"),
+    ("red", "Rosso", ("#cc241d", "#fb4934")),
+    ("yellow", "Giallo", ("#d79921", "#fabd2f")),
+    ("green", "Verde", ("#98971a", "#b8bb26")),
+    ("blue", "Blu", ("#458588", "#83a598")),
 )
 
 TAG_IDS = frozenset(tag_id for tag_id, _label, _color in TAGS)
@@ -140,6 +141,18 @@ def _modify(change) -> bool:
 def get(uri: str) -> str | None:
     with _lock:
         return _load().get(_token(uri))
+
+
+def getter():
+    """Funzione uri → etichetta su un'unica lettura del file: per ordinare
+    molti elementi senza ricontrollare il file a ogni confronto."""
+    with _lock:
+        data = _load()
+    return lambda uri: data.get(_token(uri))
+
+
+# posizione di ogni colore nell'ordinamento per etichetta
+ORDER = {tag_id: index for index, (tag_id, _l, _c) in enumerate(TAGS)}
 
 
 def set_tag(uris: list[str], tag: str | None):
@@ -285,8 +298,8 @@ def location_title(gfile: Gio.File) -> str | None:
     return f"Etichetta: {label_for(tag)}" if tag else None
 
 
-def css() -> str:
-    """Regole CSS per i pallini colorati, generate dalla tavolozza."""
+def css(dark: bool = False) -> str:
+    """Regole CSS per i pallini colorati, per il tema chiaro o scuro."""
     rules = [
         ".tag-dot { min-width: 10px; min-height: 10px;"
         " border-radius: 9999px; }",
@@ -300,6 +313,7 @@ def css() -> str:
         # sidebar: il pallino prende il posto dell'icona (16px)
         ".sidebar-tag-dot { margin: 3px; }",
     ]
-    for tag_id, _label, color in TAGS:
+    for tag_id, _label, (light, dark_color) in TAGS:
+        color = dark_color if dark else light
         rules.append(f".tag-dot.tag-{tag_id} {{ background-color: {color}; }}")
     return "\n".join(rules) + "\n"

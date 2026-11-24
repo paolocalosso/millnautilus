@@ -265,6 +265,7 @@ class MillerColumn(Gtk.Box):
         section.append("Dimensione", "col.sort-by::size")
         section.append("Data creazione", "col.sort-by::created")
         section.append("Data modifica", "col.sort-by::modified")
+        section.append("Etichetta", "col.sort-by::tag")
         menu.append_section(None, section)
         section2 = Gio.Menu()
         section2.append("Ordine decrescente", "col.sort-desc")
@@ -695,12 +696,34 @@ class MillerColumn(Gtk.Box):
     def refresh_tags(self):
         """Ridisegna i pallini dopo un cambio di etichette.
 
-        Solo le righe esistenti: niente ricarica, la selezione resta.
+        Solo le righe esistenti: niente ricarica, la selezione resta. Se la
+        colonna è ordinata per etichetta, viene anche riordinata.
         """
+        if self._sort_by == "tag":
+            self._resort_keeping_selection()
+            return
         for box in self._rows:
             item = getattr(box, "item", None)
             if item is not None:
                 self._apply_tag(box, item)
+
+    def _resort_keeping_selection(self):
+        """Riordina la colonna lasciando selezionati gli stessi elementi.
+
+        La riselezione è marcata come menu_selection: la vista non deve
+        richiudere e riaprire le colonne a destra.
+        """
+        selected = {i.uri for i in self.get_selected_items()}
+        self.menu_selection = True
+        try:
+            self._populate()
+            first = True
+            for pos in range(self.store.get_n_items()):
+                if self.store.get_item(pos).uri in selected:
+                    self.selection.select_item(pos, first)
+                    first = False
+        finally:
+            self.menu_selection = False
 
     def _on_count_ready(self, box, item):
         # aggiorna solo se la riga è ancora legata allo stesso elemento

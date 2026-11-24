@@ -232,6 +232,13 @@ def _focus_entry_on_show(entry: Gtk.Entry, select_end: int = -1):
     entry.connect("map", on_map)
 
 
+def _load_css_string(provider: Gtk.CssProvider, css: str):
+    try:
+        provider.load_from_string(css)  # GTK >= 4.12
+    except AttributeError:
+        provider.load_from_data(css.encode())
+
+
 def _format_duration(seconds: float) -> str:
     """Durata leggibile, con precisione che cala al crescere del tempo."""
     seconds = int(seconds)
@@ -362,14 +369,24 @@ class MainWindow(Adw.ApplicationWindow):
         if MainWindow._css_loaded:
             return
         MainWindow._css_loaded = True
+        display = Gdk.Display.get_default()
         provider = Gtk.CssProvider()
-        try:
-            provider.load_from_string(CSS + tags.css())  # GTK >= 4.12
-        except AttributeError:
-            provider.load_from_data((CSS + tags.css()).encode())
+        _load_css_string(provider, CSS)
         Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(), provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+        # colori delle etichette: tinte diverse per tema chiaro e scuro,
+        # ricaricate quando GNOME cambia tema
+        tag_provider = Gtk.CssProvider()
+        Gtk.StyleContext.add_provider_for_display(
+            display, tag_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        style = Adw.StyleManager.get_default()
+
+        def apply_tag_colors(*_):
+            _load_css_string(tag_provider, tags.css(style.get_dark()))
+
+        style.connect("notify::dark", apply_tag_colors)
+        apply_tag_colors()
 
     def _build_ui(self):
         self.toast_overlay = Adw.ToastOverlay()

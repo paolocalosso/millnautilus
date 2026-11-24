@@ -16,7 +16,7 @@ File explorer GTK4/libadwaita con vista a colonne (Miller view), ispirato a Naut
 - **Operazioni file**: copia/taglia/incolla, rinomina, cestino, nuova cartella, apri con, drag & drop tra colonne (drop = sposta, di default)
 - **Più finestre**: nuova finestra dal menu ⋯, da `Ctrl+N` (apre la cartella selezionata) oppure con `--new-window`; il click destro sul lanciatore offre «Apri un'altra finestra»
 - File nascosti con `Ctrl+H`
-- **Etichette colore** (rosso, giallo, verde, blu) su file e cartelle: fila di pallini nel menu contestuale o `Ctrl+1`…`Ctrl+4`; riapplicare lo stesso colore lo toglie. Nella sidebar, la sezione *Etichette* mostra quanti elementi ha ogni colore e apre una colonna con tutti gli elementi di quel colore, da qualunque cartella provengano
+- **Etichette colore** (rosso, giallo, verde, blu, nella palette gruvbox: tinte *neutral* sul tema chiaro, *bright* sullo scuro) su file e cartelle: fila di pallini nel menu contestuale o `Ctrl+1`…`Ctrl+4`; riapplicare lo stesso colore lo toglie. Nella sidebar, la sezione *Etichette* mostra quanti elementi ha ogni colore e apre una colonna con tutti gli elementi di quel colore, da qualunque cartella provengano. Ogni colonna si può anche ordinare per etichetta (menu ordinamento → *Etichetta*): prima i colori nell'ordine rosso, giallo, verde, blu, poi gli elementi senza etichetta
 
 ## Scorciatoie
 

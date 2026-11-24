@@ -242,7 +242,17 @@ SORT_KEYS = {
 def sort_items(items: list, by: str = "name",
                descending: bool = False) -> list:
     """Ordina con le cartelle sempre prima dei file."""
-    key = SORT_KEYS.get(by, SORT_KEYS["name"])
+    if by == "tag":
+        # prima gli elementi etichettati, nell'ordine dei colori, poi gli
+        # altri; a parità di colore, per nome
+        lookup = tags.getter()
+        unlabeled = len(tags.ORDER)
+
+        def key(i):
+            return (tags.ORDER.get(lookup(i.uri), unlabeled),
+                    i.name.casefold())
+    else:
+        key = SORT_KEYS.get(by, SORT_KEYS["name"])
     dirs = sorted((i for i in items if i.is_dir),
                   key=key, reverse=descending)
     files = sorted((i for i in items if not i.is_dir),
