@@ -12,7 +12,7 @@ gi.require_version("Adw", "1")
 from gi.repository import (Adw, Gdk, Gio, GLib, GObject,  # noqa: E402
                            Gtk, Pango)
 
-from . import clipboard, fileops, jobs, placestore  # noqa: E402
+from . import clipboard, fileops, jobs, placestore, tags  # noqa: E402
 from .computer import ComputerView  # noqa: E402
 from .dualpane import DualPaneView  # noqa: E402
 from .miller import MillerView  # noqa: E402
@@ -358,9 +358,9 @@ class MainWindow(Adw.ApplicationWindow):
         MainWindow._css_loaded = True
         provider = Gtk.CssProvider()
         try:
-            provider.load_from_string(CSS)  # GTK >= 4.12
+            provider.load_from_string(CSS + tags.css())  # GTK >= 4.12
         except AttributeError:
-            provider.load_from_data(CSS.encode())
+            provider.load_from_data((CSS + tags.css()).encode())
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
@@ -838,6 +838,15 @@ class MainWindow(Adw.ApplicationWindow):
             action = Gio.SimpleAction.new(name, GLib.VariantType("s"))
             action.connect("activate", self._on_transfer_to, move)
             self.add_action(action)
+        # etichette colore: l'argomento è l'id del colore, "" per toglierla
+        set_tag = Gio.SimpleAction.new("set-tag", GLib.VariantType("s"))
+        set_tag.connect("activate", self._on_set_tag)
+        self.add_action(set_tag)
+        for index, (tag_id, _label, _color) in enumerate(tags.TAGS, 1):
+            app.set_accels_for_action(f"win.set-tag::{tag_id}",
+                                      [f"<Ctrl>{index}"])
+        app.set_accels_for_action("win.set-tag::", ["<Ctrl>0"])
+
         for name, move in (("copy-to-choose", False),
                            ("move-to-choose", True)):
             action = Gio.SimpleAction.new(name, None)
@@ -1785,6 +1794,39 @@ class MainWindow(Adw.ApplicationWindow):
         placestore.add(placestore.PINNED, gfile.get_uri(), name)
         self.show_toast(f"Fissato alle Posizioni: {name}")
         self.sidebar.refresh()
+
+    def _on_set_tag(self, _action, param):
+        items = self._target_items()
+        if not items:
+            self.show_toast("Nessun elemento selezionato")
+            return
+        tag = param.get_string() or None
+        # riapplicare il colore che hanno già tutti equivale a toglierlo
+        if tag is not None and all(i.tag == tag for i in items):
+            tag = None
+        changed, errors = {}, []
+        for item in items:
+            try:
+                tags.set_tag(item.gfile, tag)
+            except GLib.Error as err:
+                errors.append(err.message)
+                continue
+            changed[item.uri] = tag
+        if changed:
+            # anche le altre finestre possono mostrare gli stessi file
+            for window in self.get_application().get_windows():
+                if isinstance(window, MainWindow):
+                    window.apply_tag_changes(changed)
+        if errors:
+            self.show_toast(f"Impossibile impostare l'etichetta: {errors[0]}")
+        elif tag is None:
+            self.show_toast(f"Etichetta rimossa: {self._describe(items)}")
+        else:
+            self.show_toast(f"{tags.label_for(tag)}: {self._describe(items)}")
+
+    def apply_tag_changes(self, changed: dict):
+        for miller in self._all_millers():
+            miller.refresh_tags(changed)
 
     def _on_files_dropped(self, _miller, files, dest_dir, move):
         self._start_transfer(list(files), dest_dir, move)

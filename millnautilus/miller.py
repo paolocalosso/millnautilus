@@ -245,6 +245,11 @@ class MillerView(Gtk.ScrolledWindow):
         directory = self.columns[-1].directory
         return directory.get_basename() or directory.get_uri()
 
+    def refresh_tags(self, changed: dict):
+        """Ridisegna le etichette colore cambiate (uri → etichetta)."""
+        for col in self.columns:
+            col.refresh_tags(changed)
+
     def reload_all(self):
         for col in self.columns:
             col.reload()

@@ -5,6 +5,8 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import Gio, GLib, GObject  # noqa: E402
 
+from . import tags  # noqa: E402
+
 FILE_ATTRS = ",".join([
     "standard::name", "standard::display-name", "standard::type",
     "standard::size", "standard::icon", "standard::symbolic-icon",
@@ -14,6 +16,7 @@ FILE_ATTRS = ",".join([
     "unix::mode", "owner::user", "owner::group",
     "thumbnail::path", "thumbnail::is-valid",
     "access::can-read", "access::can-write",
+    tags.ATTRIBUTE,
 ])
 
 
@@ -52,6 +55,15 @@ class FileItem(GObject.Object):
     @property
     def name(self) -> str:
         return self.info.get_display_name() or self.gfile.get_basename() or "?"
+
+    @property
+    def tag(self) -> str | None:
+        """Etichetta colore (vedi tags.py), None se assente."""
+        return tags.from_info(self.info)
+
+    def set_tag_local(self, tag: str | None):
+        """Aggiorna l'etichetta in memoria, dopo averla scritta sul disco."""
+        self.info.set_attribute_string(tags.ATTRIBUTE, tag or "")
 
     @property
     def is_dir(self) -> bool:

@@ -10,7 +10,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import (Gdk, Gio, GLib, GObject, Graphene,  # noqa: E402
                            Gtk, Pango)
 
-from . import colwidths, destinations, sortprefs, thumbnails  # noqa: E402
+from . import colwidths, destinations, sortprefs, tags, thumbnails  # noqa: E402
 from .models import FILE_ATTRS, FileItem, sort_items  # noqa: E402
 
 COLUMN_WIDTH = 230
@@ -56,6 +56,44 @@ EXTRACT_MENU = [
 
 PROPERTIES_ENTRY = ("Proprietà", "win.properties")
 
+# segnaposto del menu dove GtkPopoverMenu inserisce i pulsanti colore
+TAG_PICKER_ID = "tag-picker"
+
+
+def build_tag_picker(current: str | None,
+                     on_clicked=None) -> Gtk.Widget:
+    """Fila di pallini colorati per assegnare un'etichetta.
+
+    `current` è l'etichetta comune a tutti gli elementi interessati (viene
+    evidenziata; cliccarla di nuovo la toglie). `on_clicked` serve a
+    chiudere il menu: i widget personalizzati non lo fanno da soli.
+    """
+    box = Gtk.Box(spacing=4, halign=Gtk.Align.CENTER,
+                  css_classes=["tag-picker"])
+    for tag_id, label, _color in tags.TAGS:
+        dot = Gtk.Box(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER,
+                      css_classes=["tag-dot", f"tag-{tag_id}"])
+        button = Gtk.Button(child=dot, action_name="win.set-tag",
+                            action_target=GLib.Variant("s", tag_id),
+                            css_classes=["flat"])
+        if tag_id == current:
+            button.add_css_class("tag-current")
+            button.set_tooltip_text(f"Togli l'etichetta {label.lower()}")
+        else:
+            button.set_tooltip_text(f"Etichetta {label.lower()}")
+        if on_clicked is not None:
+            button.connect("clicked", lambda _b: on_clicked())
+        box.append(button)
+    clear = Gtk.Button(icon_name="edit-clear-symbolic",
+                       action_name="win.set-tag",
+                       action_target=GLib.Variant("s", ""),
+                       tooltip_text="Nessuna etichetta",
+                       css_classes=["flat"])
+    if on_clicked is not None:
+        clear.connect("clicked", lambda _b: on_clicked())
+    box.append(clear)
+    return box
+
 
 def build_context_menu(show_extract: bool = False,
                        dest_menu: Gio.Menu | None = None) -> Gio.Menu:
@@ -87,6 +125,12 @@ def build_context_menu(show_extract: bool = False,
         other.append(label, action)
     archive_section.append_submenu("Altro", other)
     menu.append_section(None, archive_section)
+
+    tag_section = Gio.Menu()
+    picker = Gio.MenuItem.new(None, None)
+    picker.set_attribute_value("custom", GLib.Variant("s", TAG_PICKER_ID))
+    tag_section.append_item(picker)
+    menu.append_section(None, tag_section)
 
     last = Gio.Menu()
     last.append(*PROPERTIES_ENTRY)
@@ -154,6 +198,9 @@ class MillerColumn(Gtk.Box):
         self._filter_text = ""
         self._recursive = False
         self._search_cancellable: Gio.Cancellable | None = None
+        # righe create dalla factory (vengono riciclate, non distrutte):
+        # servono ad aggiornare le etichette senza ricaricare la colonna
+        self._rows: list[Gtk.Box] = []
         self._sort_by, self._sort_desc = sortprefs.get_sort(
             directory.get_uri())
 
@@ -566,6 +613,10 @@ class MillerColumn(Gtk.Box):
         text_box.append(box.label)
         text_box.append(box.date)
 
+        # pallino dell'etichetta colore
+        box.tag = Gtk.Box(valign=Gtk.Align.CENTER, visible=False,
+                          css_classes=["tag-dot"])
+        box.tag_class = None
         box.menu_btn = Gtk.Button(icon_name="view-more-symbolic",
                                   valign=Gtk.Align.CENTER,
                                   css_classes=["flat", "circular",
@@ -573,8 +624,10 @@ class MillerColumn(Gtk.Box):
         box.menu_btn.connect("clicked", self._on_row_menu_clicked, list_item)
         box.append(icon_overlay)
         box.append(text_box)
+        box.append(box.tag)
         box.append(box.menu_btn)
         list_item.set_child(box)
+        self._rows.append(box)
 
         gesture = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
         gesture.connect("pressed", self._on_right_click, list_item)
@@ -597,6 +650,7 @@ class MillerColumn(Gtk.Box):
         # riferimento all'elemento attualmente legato a questa riga: serve a
         # scartare i conteggi asincroni che arrivano dopo il riciclo della riga
         box.item = item
+        self._apply_tag(box, item)
         self._update_meta(box, item)
         if item.is_dir:
             item.count_children_async(
@@ -624,6 +678,38 @@ class MillerColumn(Gtk.Box):
             box.thumb.set_visible(True)
         else:
             box.icon.set_from_paintable(texture)
+
+    @staticmethod
+    def _apply_tag(box, item: FileItem):
+        tag = item.tag
+        if box.tag_class is not None:
+            box.tag.remove_css_class(box.tag_class)
+            box.tag_class = None
+        if tag is not None:
+            box.tag_class = f"tag-{tag}"
+            box.tag.add_css_class(box.tag_class)
+            box.tag.set_tooltip_text(tags.label_for(tag))
+        box.tag.set_visible(tag is not None)
+
+    def refresh_tags(self, changed: dict[str, str | None]):
+        """Applica etichette appena modificate (uri → etichetta).
+
+        Aggiorna in memoria gli elementi della colonna e ridisegna solo le
+        righe visibili interessate: niente ricarica, la selezione resta.
+        """
+        for item in self._all_items:
+            uri = item.uri
+            if uri in changed:
+                item.set_tag_local(changed[uri])
+        # i risultati della ricerca ricorsiva non stanno in _all_items
+        for i in range(self.store.get_n_items()):
+            item = self.store.get_item(i)
+            if item.uri in changed:
+                item.set_tag_local(changed[item.uri])
+        for box in self._rows:
+            item = getattr(box, "item", None)
+            if item is not None and item.uri in changed:
+                self._apply_tag(box, item)
 
     def _on_count_ready(self, box, item):
         # aggiorna solo se la riga è ancora legata allo stesso elemento
@@ -711,6 +797,11 @@ class MillerColumn(Gtk.Box):
             dest_menu = None
         popover = Gtk.PopoverMenu.new_from_model(
             build_context_menu(show_extract, dest_menu))
+        current = {t.tag for t in targets}
+        popover.add_child(
+            build_tag_picker(current.pop() if len(current) == 1 else None,
+                             popover.popdown),
+            TAG_PICKER_ID)
         popover.set_parent(anchor)
         popover.set_has_arrow(False)
         popover.connect("closed", lambda p: GLib.idle_add(p.unparent))

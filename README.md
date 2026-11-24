@@ -16,6 +16,7 @@ File explorer GTK4/libadwaita con vista a colonne (Miller view), ispirato a Naut
 - **Operazioni file**: copia/taglia/incolla, rinomina, cestino, nuova cartella, apri con, drag & drop tra colonne (drop = sposta, di default)
 - **Più finestre**: nuova finestra dal menu ⋯, da `Ctrl+N` (apre la cartella selezionata) oppure con `--new-window`; il click destro sul lanciatore offre «Apri un'altra finestra»
 - File nascosti con `Ctrl+H`
+- **Etichette colore** (rosso, giallo, verde, blu) su file e cartelle: fila di pallini nel menu contestuale o `Ctrl+1`…`Ctrl+4`; riapplicare lo stesso colore lo toglie. Sono salvate nei metadati GVfs del file, quindi seguono rinomine e spostamenti, ma restano sulla macchina locale (non si sincronizzano e non passano alle copie)
 
 ## Scorciatoie
 
@@ -28,6 +29,8 @@ File explorer GTK4/libadwaita con vista a colonne (Miller view), ispirato a Naut
 | `Canc` | Sposta nel cestino |
 | `Ctrl+Shift+N` | Nuova cartella |
 | `Ctrl+H` | Mostra file nascosti |
+| `Ctrl+1` … `Ctrl+4` | Etichetta rossa / gialla / verde / blu |
+| `Ctrl+0` | Togli etichetta |
 | `Alt+←` / `Alt+→` | Indietro / Avanti |
 | `Ctrl+L` | Modifica percorso |
 | `Ctrl+F` | Cerca nella colonna corrente |
