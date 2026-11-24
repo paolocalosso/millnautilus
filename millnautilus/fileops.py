@@ -12,6 +12,8 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import Gio, GLib  # noqa: E402
 
+from . import tags  # noqa: E402
+
 COPY_FLAGS = Gio.FileCopyFlags.NOFOLLOW_SYMLINKS
 
 
@@ -186,6 +188,7 @@ def _transfer_one(src: Gio.File, dest_dir: Gio.File, move: bool, cancellable,
         _merge_dir(src, dest, cancellable, handler, state, tracker)
         if move:
             _delete_recursive(src, cancellable)
+            tags.moved(src, dest)
         return
 
     flags = COPY_FLAGS
@@ -199,6 +202,7 @@ def _transfer_one(src: Gio.File, dest_dir: Gio.File, move: bool, cancellable,
     if move:
         try:
             src.move(dest, flags, cancellable, report, None)
+            tags.moved(src, dest)
             if tracker is not None and not directory:
                 tracker.file_done(size)
             return
@@ -209,6 +213,7 @@ def _transfer_one(src: Gio.File, dest_dir: Gio.File, move: bool, cancellable,
                 raise
             _copy_recursive(src, dest, cancellable, tracker)
             _delete_recursive(src, cancellable)
+            tags.moved(src, dest)
             return
     try:
         src.copy(dest, flags, cancellable, report, None)
@@ -415,6 +420,7 @@ def trash(files: list[Gio.File], on_done):
         try:
             for gfile in files:
                 gfile.trash(None)
+                tags.removed(gfile)
         except GLib.Error as err:
             error = err.message
         GLib.idle_add(on_done, error)
@@ -434,6 +440,7 @@ def delete(files: list[Gio.File], on_done,
                     GLib.idle_add(on_progress, index / total,
                                   gfile.get_basename() or "")
                 _delete_recursive(gfile, cancellable)
+                tags.removed(gfile)
         except GLib.Error as err:
             error = None if err.matches(Gio.io_error_quark(),
                                         Gio.IOErrorEnum.CANCELLED) \
@@ -630,7 +637,8 @@ def compress(files: list[Gio.File], dest_dir: Gio.File, name: str,
 def rename(gfile: Gio.File, new_name: str, on_done):
     def callback(f, result):
         try:
-            f.set_display_name_finish(result)
+            renamed = f.set_display_name_finish(result)
+            tags.moved(f, renamed)
             on_done(None)
         except GLib.Error as err:
             on_done(err.message)

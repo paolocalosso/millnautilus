@@ -8,7 +8,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import clipboard, placestore, places  # noqa: E402
+from . import clipboard, placestore, places, tags  # noqa: E402
 
 
 def _xdg(directory) -> str | None:
@@ -18,7 +18,7 @@ def _xdg(directory) -> str | None:
 class SidebarRow(Gtk.ListBoxRow):
     def __init__(self, icon_name: str, title: str, gfile: Gio.File | None,
                  volume: Gio.Volume | None = None, action: str | None = None,
-                 mount: Gio.Mount | None = None):
+                 mount: Gio.Mount | None = None, tag: str | None = None):
         super().__init__()
         self.gfile = gfile
         self.volume = volume
@@ -31,10 +31,21 @@ class SidebarRow(Gtk.ListBoxRow):
                         margin_top=6, margin_bottom=6,
                         margin_start=10, margin_end=10)
         box = Gtk.Box(spacing=10)
-        box.append(Gtk.Image.new_from_icon_name(icon_name))
-        label = Gtk.Label(label=title, xalign=0,
+        if tag is not None:
+            # etichetta colore: pallino al posto dell'icona
+            box.append(Gtk.Box(valign=Gtk.Align.CENTER,
+                               css_classes=["tag-dot", f"tag-{tag}",
+                                            "sidebar-tag-dot"]))
+        else:
+            box.append(Gtk.Image.new_from_icon_name(icon_name))
+        label = Gtk.Label(label=title, xalign=0, hexpand=True,
                           ellipsize=Pango.EllipsizeMode.END)
         box.append(label)
+        # numero di elementi (solo per le etichette)
+        self.count_label = Gtk.Label(visible=False,
+                                     css_classes=["dim-label", "caption",
+                                                  "numeric"])
+        box.append(self.count_label)
         outer.append(box)
 
         # occupazione del dispositivo: nascoste finché non arrivano i dati
@@ -233,6 +244,22 @@ class Sidebar(Gtk.Box):
             self._attach_menu(row)
             self._make_reorderable(row, uri, self.reorder_bookmark, "bookmark")
             self.listbox.append(row)
+
+        # Etichette colore: ognuna apre la vista con i suoi elementi
+        self._tag_rows = {}
+        for tag_id, label, _color in tags.TAGS:
+            row = SidebarRow("", label, tags.location(tag_id), tag=tag_id)
+            row.section = "Etichette"
+            self._tag_rows[tag_id] = row
+            self.listbox.append(row)
+        self.update_tag_counts()
+
+    def update_tag_counts(self):
+        counts = tags.counts()
+        for tag_id, row in getattr(self, "_tag_rows", {}).items():
+            n = counts.get(tag_id, 0)
+            row.count_label.set_text(str(n))
+            row.count_label.set_visible(n > 0)
 
     def _add(self, icon: str, title: str, gfile: Gio.File, section: str,
              mount: Gio.Mount | None = None) -> SidebarRow:

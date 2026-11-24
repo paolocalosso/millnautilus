@@ -293,6 +293,12 @@ class MainWindow(Adw.ApplicationWindow):
         self._add_actions()
         self._apply_state(state)
         self.connect("close-request", self._on_close_request)
+        # etichette cambiate da questa o da un'altra finestra, o dal file
+        # sincronizzato da un'altra macchina
+        self._tags_handler = tags.notifier.connect("changed",
+                                                   self._on_tags_changed)
+        self.connect("destroy", lambda *_: tags.notifier.disconnect(
+            self._tags_handler))
 
         self.show_computer()
 
@@ -1029,7 +1035,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_location_changed(self, _miller, gfile: Gio.File):
         self.pathbar.set_location(gfile)
-        self.set_title(gfile.get_basename() or gfile.get_uri())
+        self.set_title(tags.location_title(gfile)
+                       or gfile.get_basename() or gfile.get_uri())
 
     def _on_file_activated(self, _miller, item: FileItem):
         """Doppio click: apre con l'app predefinita del tipo, se esiste;
@@ -1047,8 +1054,9 @@ class MainWindow(Adw.ApplicationWindow):
             self.show_toast(f"Impossibile aprire: {err.message}")
 
     def _on_go_up(self, _btn):
-        if self.active_miller.root:
-            parent = self.active_miller.root.get_parent()
+        root = self.active_miller.root
+        if root and not tags.tag_of_location(root):
+            parent = root.get_parent()
             if parent:
                 self.navigate_to(parent)
 
@@ -1804,29 +1812,22 @@ class MainWindow(Adw.ApplicationWindow):
         # riapplicare il colore che hanno già tutti equivale a toglierlo
         if tag is not None and all(i.tag == tag for i in items):
             tag = None
-        changed, errors = {}, []
-        for item in items:
-            try:
-                tags.set_tag(item.gfile, tag)
-            except GLib.Error as err:
-                errors.append(err.message)
-                continue
-            changed[item.uri] = tag
-        if changed:
-            # anche le altre finestre possono mostrare gli stessi file
-            for window in self.get_application().get_windows():
-                if isinstance(window, MainWindow):
-                    window.apply_tag_changes(changed)
-        if errors:
-            self.show_toast(f"Impossibile impostare l'etichetta: {errors[0]}")
-        elif tag is None:
+        # le finestre si aggiornano tramite tags.notifier
+        try:
+            tags.set_tag([i.uri for i in items], tag)
+        except OSError as err:
+            self.show_toast(
+                f"Impossibile salvare le etichette: {err.strerror or err}")
+            return
+        if tag is None:
             self.show_toast(f"Etichetta rimossa: {self._describe(items)}")
         else:
             self.show_toast(f"{tags.label_for(tag)}: {self._describe(items)}")
 
-    def apply_tag_changes(self, changed: dict):
+    def _on_tags_changed(self, _notifier):
         for miller in self._all_millers():
-            miller.refresh_tags(changed)
+            miller.refresh_tags()
+        self.sidebar.update_tag_counts()
 
     def _on_files_dropped(self, _miller, files, dest_dir, move):
         self._start_transfer(list(files), dest_dir, move)

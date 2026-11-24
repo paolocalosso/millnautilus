@@ -5,7 +5,8 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import Gio, GLib, GObject, Gtk  # noqa: E402
 
-from .column import COLUMN_WIDTH, MillerColumn  # noqa: E402
+from . import tags  # noqa: E402
+from .column import COLUMN_WIDTH, MillerColumn, TagColumn  # noqa: E402
 from .models import FileItem  # noqa: E402
 
 # colonne sempre visibili, anche vuote
@@ -120,7 +121,8 @@ class MillerView(Gtk.ScrolledWindow):
             self.box.append(placeholder)
 
     def _add_column(self, directory: Gio.File):
-        col = MillerColumn(directory, depth=len(self.columns),
+        cls = TagColumn if tags.tag_of_location(directory) else MillerColumn
+        col = cls(directory, depth=len(self.columns),
                            show_hidden=self.show_hidden,
                            compact=self.compact)
         col.connect("item-selected", self._on_item_selected)
@@ -245,10 +247,10 @@ class MillerView(Gtk.ScrolledWindow):
         directory = self.columns[-1].directory
         return directory.get_basename() or directory.get_uri()
 
-    def refresh_tags(self, changed: dict):
-        """Ridisegna le etichette colore cambiate (uri → etichetta)."""
+    def refresh_tags(self):
+        """Ridisegna le etichette colore dopo un cambiamento."""
         for col in self.columns:
-            col.refresh_tags(changed)
+            col.refresh_tags()
 
     def reload_all(self):
         for col in self.columns:

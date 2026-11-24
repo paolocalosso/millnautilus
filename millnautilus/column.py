@@ -396,6 +396,7 @@ class MillerColumn(Gtk.Box):
             return
         if not infos:
             enumerator.close_async(GLib.PRIORITY_DEFAULT, None, None, None)
+            tags.import_legacy(self._all_items)
             self._populate()
             return
         for info in infos:
@@ -691,24 +692,14 @@ class MillerColumn(Gtk.Box):
             box.tag.set_tooltip_text(tags.label_for(tag))
         box.tag.set_visible(tag is not None)
 
-    def refresh_tags(self, changed: dict[str, str | None]):
-        """Applica etichette appena modificate (uri → etichetta).
+    def refresh_tags(self):
+        """Ridisegna i pallini dopo un cambio di etichette.
 
-        Aggiorna in memoria gli elementi della colonna e ridisegna solo le
-        righe visibili interessate: niente ricarica, la selezione resta.
+        Solo le righe esistenti: niente ricarica, la selezione resta.
         """
-        for item in self._all_items:
-            uri = item.uri
-            if uri in changed:
-                item.set_tag_local(changed[uri])
-        # i risultati della ricerca ricorsiva non stanno in _all_items
-        for i in range(self.store.get_n_items()):
-            item = self.store.get_item(i)
-            if item.uri in changed:
-                item.set_tag_local(changed[item.uri])
         for box in self._rows:
             item = getattr(box, "item", None)
-            if item is not None and item.uri in changed:
+            if item is not None:
                 self._apply_tag(box, item)
 
     def _on_count_ready(self, box, item):
@@ -952,3 +943,101 @@ class MillerColumn(Gtk.Box):
         if item is None or not item.is_dir:
             return False
         return self._deliver_drop(value, item.gfile)
+
+
+class TagColumn(MillerColumn):
+    """Colonna virtuale: tutti gli elementi con una certa etichetta.
+
+    Gli elementi vengono da cartelle diverse; selezionando una cartella si
+    apre a destra una colonna normale. Non è una cartella vera: niente
+    incolla, nuova cartella o rilascio di file sullo sfondo.
+    """
+
+    def __init__(self, location: Gio.File, depth: int, show_hidden=False,
+                 compact=False):
+        self.tag = tags.tag_of_location(location)
+        self._uris: set[str] = set()
+        super().__init__(location, depth, show_hidden=show_hidden,
+                         compact=compact)
+
+    def reload(self):
+        self._cancellable.cancel()
+        self._cancellable = Gio.Cancellable()
+        cancellable = self._cancellable
+        self._all_items = []
+        self._clear_status()
+        self.store.remove_all()
+        uris = tags.uris_with(self.tag)
+        self._uris = set(uris)
+        if not uris:
+            self._show_error("Nessun elemento con questa etichetta")
+            return
+        pending = {"n": len(uris)}
+
+        def on_info(gfile, result):
+            try:
+                info = gfile.query_info_finish(result)
+            except GLib.Error:
+                # file sparito, o su una risorsa di rete non montata
+                info = None
+            if cancellable.is_cancelled():
+                return
+            if info is not None:
+                self._all_items.append(FileItem(gfile, info))
+            pending["n"] -= 1
+            if pending["n"] == 0:
+                self._populate()
+                if not self._all_items:
+                    self._show_status(
+                        "Gli elementi con questa etichetta non sono "
+                        "raggiungibili da qui")
+
+        for uri in uris:
+            Gio.File.new_for_uri(uri).query_info_async(
+                FILE_ATTRS, Gio.FileQueryInfoFlags.NONE,
+                GLib.PRIORITY_DEFAULT, cancellable, on_info)
+
+    def refresh_tags(self):
+        """Se l'insieme degli elementi etichettati è cambiato, ricarica
+        mantenendo la selezione."""
+        if set(tags.uris_with(self.tag)) == self._uris:
+            super().refresh_tags()
+            return
+        selected = self.get_selected()
+        if selected is not None:
+            self.select_file(selected.gfile)
+        self.reload()
+
+    def _update_meta(self, box, item: FileItem):
+        """Al posto della data: la cartella che contiene l'elemento."""
+        if self.compact:
+            return
+        parent = item.gfile.get_parent()
+        where = ""
+        if parent is not None:
+            where = parent.get_basename() or parent.get_uri()
+            if parent.get_path() == GLib.get_home_dir():
+                where = "Home"
+        extra = item.count_str if item.is_dir else item.size_str
+        box.date.set_text(f"{where}  ·  {extra}" if where and extra
+                          else where or extra)
+
+    def _deliver_drop(self, value, dest: Gio.File) -> bool:
+        if dest.equal(self.directory):
+            return False  # lo sfondo non è una cartella vera
+        return super()._deliver_drop(value, dest)
+
+    def _popup_background_menu(self, origin: Gtk.Widget, x: float = None,
+                               y: float = None, arrow: bool = False):
+        menu = Gio.Menu()
+        menu.append("Seleziona tutto", "win.select-all")
+        menu.append("Ricarica", "win.reload")
+        popover = Gtk.PopoverMenu.new_from_model(menu)
+        popover.set_parent(origin)
+        popover.set_has_arrow(arrow)
+        if x is not None and y is not None:
+            rect = Gdk.Rectangle()
+            rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+            popover.set_pointing_to(rect)
+        popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
+        popover.popup()

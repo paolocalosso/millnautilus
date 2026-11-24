@@ -16,7 +16,7 @@ File explorer GTK4/libadwaita con vista a colonne (Miller view), ispirato a Naut
 - **Operazioni file**: copia/taglia/incolla, rinomina, cestino, nuova cartella, apri con, drag & drop tra colonne (drop = sposta, di default)
 - **Più finestre**: nuova finestra dal menu ⋯, da `Ctrl+N` (apre la cartella selezionata) oppure con `--new-window`; il click destro sul lanciatore offre «Apri un'altra finestra»
 - File nascosti con `Ctrl+H`
-- **Etichette colore** (rosso, giallo, verde, blu) su file e cartelle: fila di pallini nel menu contestuale o `Ctrl+1`…`Ctrl+4`; riapplicare lo stesso colore lo toglie. Sono salvate nei metadati GVfs del file, quindi seguono rinomine e spostamenti, ma restano sulla macchina locale (non si sincronizzano e non passano alle copie)
+- **Etichette colore** (rosso, giallo, verde, blu) su file e cartelle: fila di pallini nel menu contestuale o `Ctrl+1`…`Ctrl+4`; riapplicare lo stesso colore lo toglie. Nella sidebar, la sezione *Etichette* mostra quanti elementi ha ogni colore e apre una colonna con tutti gli elementi di quel colore, da qualunque cartella provengano
 
 ## Scorciatoie
 
@@ -123,6 +123,7 @@ chiuso (`nautilus -q`); Millnautilus lo acquisisce al primo avvio successivo.
 
 - L'anteprima PDF/documenti usa le thumbnail generate dal sistema (`thumbnail::path`); se non esiste ancora una thumbnail viene mostrata l'icona del tipo file
 - Preferiti e Posizioni fissate stanno insieme in `places.json`, in `~/.config/millnautilus/`. Per condividerli tra più macchine basta impostare `MILLNAUTILUS_PLACES` su un file dentro una cartella sincronizzata (Koofr, pCloud…). I percorsi sono salvati in forma portabile (`xdg:DOCUMENTS`, `home:…`), quindi funzionano anche con GNOME in lingue diverse (`Documenti` / `Documents`). I preferiti vengono comunque rispecchiati in `~/.config/gtk-3.0/bookmarks`, così Nautilus continua a vederli
+- Le etichette colore stanno in `tags.json`, nella stessa cartella di `places.json`: puntando `MILLNAUTILUS_PLACES` a una cartella sincronizzata si sincronizzano anche loro (oppure si può indicare un file a parte con `MILLNAUTILUS_TAGS`). Usano gli stessi percorsi portabili, e il file viene riletto appena cambia. Millnautilus aggiorna le etichette quando rinomina, sposta, cestina o elimina un elemento; le operazioni fatte con altri programmi non le vede, e l'etichetta resta sul vecchio percorso. Le copie nascono senza etichetta
 - Le connessioni SFTP usano GVfs: le credenziali sono chieste da `Gtk.MountOperation` e gestite dal portachiavi di sistema
 
 ## Struttura

@@ -6,6 +6,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
+from . import tags  # noqa: E402
 from .fm1 import FileManager1  # noqa: E402
 from .window import MainWindow  # noqa: E402
 
@@ -27,6 +28,7 @@ class MillnautilusApp(Adw.Application):
 
     def do_startup(self):
         Adw.Application.do_startup(self)
+        tags.watch()
         self._fm1.own()
 
     def do_shutdown(self):

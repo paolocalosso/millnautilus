@@ -7,6 +7,8 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
+from . import tags  # noqa: E402
+
 
 class PathBar(Gtk.Stack):
     """Breadcrumb cliccabile; click sullo spazio vuoto (o Ctrl+L) → entry."""
@@ -73,6 +75,10 @@ class PathBar(Gtk.Stack):
 
     # ------------------------------------------------------------ API
     def set_location(self, gfile: Gio.File):
+        title = tags.location_title(gfile)
+        if title:
+            self.set_placeholder(title)  # vista virtuale delle etichette
+            return
         self._location = gfile
         self._set_entry_text(gfile.get_path() or gfile.get_uri())
         self._rebuild_buttons(gfile)
