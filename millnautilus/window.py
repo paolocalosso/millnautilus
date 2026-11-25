@@ -129,7 +129,7 @@ paned > separator.wide {
    mette dietro ai popup delle app (opzione "blur-menus"); il raggio
    coincide con il menu-corner-radius di BMS */
 popover.menu > contents {
-  background-color: alpha(@popover_bg_color, 0.65);
+  background-color: alpha(@popover_bg_color, 0.45);
   border-radius: 25px;
 }
 """
