@@ -43,10 +43,18 @@ LEGACY_ATTRIBUTE = "metadata::millnautilus-tag"
 
 
 def _tags_file() -> str:
+    """Percorso reale del file, con i link già risolti.
+
+    places.json può essere un link verso una cartella sincronizzata: tags.json
+    va accanto al file vero, non al link. E se tags.json stesso è un link, la
+    scrittura atomica (os.replace) va fatta sul file a cui punta, altrimenti
+    sostituirebbe il link con un file normale.
+    """
     override = os.environ.get("MILLNAUTILUS_TAGS")
     if override:
-        return os.path.expanduser(override)
-    return os.path.join(os.path.dirname(placestore.PLACES_FILE), "tags.json")
+        return os.path.realpath(os.path.expanduser(override))
+    places_dir = os.path.dirname(os.path.realpath(placestore.PLACES_FILE))
+    return os.path.realpath(os.path.join(places_dir, "tags.json"))
 
 
 TAGS_FILE = _tags_file()
